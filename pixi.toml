@@ -1,0 +1,24 @@
+[project]
+authors = ["d-laub <dlaub@ucsd.edu>"]
+channels = ["nvidia", "conda-forge", "pytorch", "bioconda"]
+description = "Benchmarks and figures for the GenVarLoader paper."
+name = "gvl-paper"
+platforms = ["linux-64"]
+version = "0.1.0"
+
+[tasks]
+
+[dependencies]
+pytorch-cuda = "12.4.*"
+pytorch-lightning = ">=2.4.0,<3"
+numpy = "<2"
+tqdm = ">=4.67.1,<5"
+polars = ">=1.17.0,<2"
+typing-extensions = ">=4.12.2,<5"
+einops = ">=0.8.0,<0.9"
+jupyterlab = ">=4.3.3,<5"
+
+[pypi-dependencies]
+genvarloader = ">=0.6.1,<0.7"
+bpnet-lite = ">=0.8.1,<0.9"
+seqmodels = "==0.0.3"
