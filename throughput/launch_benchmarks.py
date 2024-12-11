@@ -34,9 +34,7 @@ DATASETS = {
         ),
     ),
     "1KGP": Dataset(
-        fasta=Path(
-            "/carter/users/dlaub/data/1kGP/GRCh38_full_analysis_set_plus_decoy_hla.fa"
-        ),
+        fasta=WDIR / "GRCh38_full_analysis_set_plus_decoy_hla.fa",
         variants=Path("/carter/users/dlaub/data/1kGP/1kGP.pgen"),
         ds_dir=WDIR / "datasets" / "1kgp",
     ),

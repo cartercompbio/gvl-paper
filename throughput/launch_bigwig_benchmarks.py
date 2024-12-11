@@ -5,7 +5,7 @@ from subprocess import CalledProcessError, run
 import typer
 from loguru import logger
 
-WDIR = Path("/cellar/users/dlaub/projects/GenVarLoader/benchmarking/haplotypes")
+WDIR = Path(__file__).parent
 
 
 def main(
@@ -31,9 +31,7 @@ def main(
         npb = length * batch_size
         n_batches = max(20, -(-max_nucleotides // npb))
         try:
-            launch_bench(
-                results, bigwig_table, length, threads, batch_size, n_batches
-            )
+            launch_bench(results, bigwig_table, length, threads, batch_size, n_batches)
         except CalledProcessError as e:
             print(e.stdout, e.stderr)
             raise e
@@ -58,7 +56,7 @@ def launch_bench(
         f"--error={WDIR / 'err' / err_file}",
         "--nodelist=carter-cn-04",
         "--mem=16G",
-        str(WDIR / "bigwig_benchmark.py"),
+        str(WDIR / "benchmark_bigwig.py"),
         str(length),
         str(batch_size),
         str(n_batches),

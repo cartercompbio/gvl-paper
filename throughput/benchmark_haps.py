@@ -1,9 +1,7 @@
 #! /usr/bin/env python
 
 from pathlib import Path
-from typing import List
 
-import torch
 import typer
 
 
@@ -18,8 +16,10 @@ def bench(
 ):
     import os
     from time import perf_counter
+    from typing import List
 
     import genvarloader as gvl
+    import torch
     from filelock import FileLock
 
     ds = gvl.Dataset.open(ds_path, fasta, return_tracks=False)
@@ -46,7 +46,7 @@ def bench(
         seconds = perf_counter() - t0
         throughputs.append(n_nucleotides / seconds / 2**20)
 
-    threads = int(os.environ["SLURM_CPUS_PER_TASK"])
+    threads = len(os.sched_getaffinity(0))
     with FileLock(results.with_suffix(".csv.lock"), timeout=10):
         with open(results, "a") as f:
             if f.tell() == 0:

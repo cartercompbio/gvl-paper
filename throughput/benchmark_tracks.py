@@ -1,13 +1,8 @@
 #! /usr/bin/env python
 
-from typing import TYPE_CHECKING, List
+from pathlib import Path
 
 import typer
-
-if TYPE_CHECKING:
-    pass
-
-from pathlib import Path
 
 
 def bench(
@@ -21,6 +16,7 @@ def bench(
 ):
     import os
     from time import perf_counter
+    from typing import List
 
     import genvarloader as gvl
     from filelock import FileLock
@@ -48,7 +44,7 @@ def bench(
         seconds = perf_counter() - t0
         throughputs.append(n_nucleotides / seconds / 2**20 * batch.element_size())  # type: ignore
 
-    threads = int(os.environ["SLURM_CPUS_PER_TASK"])
+    threads = len(os.sched_getaffinity(0))
     with FileLock(results.with_suffix(".csv.lock"), timeout=10):
         with open(results, "a") as f:
             if f.tell() == 0:

@@ -5,7 +5,7 @@ from subprocess import CalledProcessError, run
 import typer
 from loguru import logger
 
-WDIR = Path("/cellar/users/dlaub/projects/GenVarLoader/benchmarking/haplotypes")
+WDIR = Path(__file__).parent
 
 
 def main(
@@ -58,7 +58,7 @@ def launch_bench(
         f"--error={WDIR / 'err' / err_file}",
         "--nodelist=carter-cn-04",
         "--mem=16G",
-        str(WDIR / "ref_benchmark.py"),
+        str(WDIR / "benchmark_ref.py"),
         str(fasta),
         str(length),
         "62",  # n samples
