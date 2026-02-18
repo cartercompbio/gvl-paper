@@ -1,4 +1,4 @@
-[project]
+[workspace]
 authors = ["d-laub <dlaub@ucsd.edu>"]
 channels = ["nvidia", "conda-forge", "pytorch", "bioconda"]
 description = "Benchmarks and figures for the GenVarLoader paper."
@@ -7,27 +7,41 @@ platforms = ["linux-64"]
 version = "0.2.0"
 
 [environments]
-bench = ["bench"]
+default = ["bench"]
 basenji2 = ["basenji2"]
-borzoi = ["borzoi"]
 
 [feature.bench.dependencies]
-pytorch-cuda = "12.4.*"
+python = "3.12.*"
+ipykernel = "*"
+ipywidgets = "*"
+
+[feature.bench.pypi-dependencies]
+torch = { version = "==2.10.0", index = "https://download.pytorch.org/whl/cu126" }
 pytorch-lightning = ">=2.4.0,<3"
 numpy = "<2"
 tqdm = ">=4.67.1,<5"
-polars = ">=1.17.0,<2"
-typing-extensions = ">=4.12.2,<5"
+polars = ">=1.37.1,<2"
+typing-extensions = ">=4.14,<5"
 einops = ">=0.8.0,<0.9"
 jupyterlab = ">=4.3.3,<5"
-
-[feature.bench.pypi-dependencies]
-genvarloader = ">=0.6.1,<0.7"
+genvarloader = ">=0.20,<0.21"
+genoray = ">=2.1.3,<3"
 bpnet-lite = ">=0.8.1,<0.9"
 seqmodels = "==0.0.3"
+cyclopts = ">=4.5.1, <5"
+seaborn = "*"
+rich = "*"
+matplotlib = "*"
+statsmodels = ">=0.14.6, <0.15"
+
+[feature.bench.tasks]
+i-kernel = "ipython kernel install --user --name gvl-paper-bench"
 
 [feature.basenji2.dependencies]
 python = "3.12.*"
+
+[feature.basenji2.pypi-dependencies]
+torch = { version = "==2.6.0", index = "https://download.pytorch.org/whl/cu126" }
 seaborn = "*"
 anndata = "*"
 polars = "*"
@@ -37,43 +51,12 @@ uv = "*"
 mpl-scatter-density = "*"
 astropy = "*"
 upsetplot = "*"
-
-[feature.basenji2.pypi-dependencies]
-torch = { version = "==2.6.0", index = "https://download.pytorch.org/whl/cu126" }
+pysam = "!=0.23.1"
 basenji2-pytorch = "==0.1.2"
-genvarloader = "==0.15.0"
+genvarloader = "==0.20.0"
 
 [feature.basenji2.system-requirements]
 cuda = "12.2"
 
 [feature.basenji2.tasks]
-# i-edit = "uv pip install -e /carter/users/dlaub/projects/GenVarLoader"
 i-kernel = "ipython kernel install --user --name gvl-basenji2"
-
-[feature.basenji2.pypi-options]
-no-build-isolation = ["genvarloader"]
-
-[feature.borzoi.dependencies]
-python = "3.12.*"
-uv = "*"
-cxx-compiler = "*"
-ipython = "*"
-seaborn = "*"
-polars = "*"
-cuda-toolkit = { version = "12.6.*", channel = "nvidia" }
-anndata = ">=0.11.4,<0.12"
-fastexcel = ">=0.13.0,<0.14"
-
-[feature.borzoi.pypi-dependencies]
-torch = { version = "==2.6.0", index = "https://download.pytorch.org/whl/cu126" }
-# genvarloader = "==0.12.0"
-seqpro = "==0.3.1"
-
-[feature.borzoi.system-requirements]
-cuda = "12.2"
-
-[feature.borzoi.tasks]
-i-edit = "uv pip install -e /carter/users/dlaub/projects/genoray -e /carter/users/dlaub/projects/GenVarLoader"
-i-borzoi = "uv pip install 'flash-attn~=2.7.4' --no-build-isolation; uv pip install borzoi-pytorch==0.4.1"
-install = { depends-on = ["i-edit", "i-borzoi"] }
-i-kernel = "ipython kernel install --user --name gvl-borzoi"

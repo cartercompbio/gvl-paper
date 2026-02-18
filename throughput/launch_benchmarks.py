@@ -3,13 +3,14 @@ import re
 from enum import Enum
 from pathlib import Path
 from subprocess import CalledProcessError, run
-from typing import Optional
 
-import typer
+import cyclopts
 from attrs import define
 from loguru import logger
 
-WDIR = Path(__file__).parent
+proj_dir = Path(__file__).parent.parent
+ds_dir = proj_dir / "data" / "datasets"
+res_dir = proj_dir / "results"
 
 
 @define(frozen=True)
@@ -17,68 +18,76 @@ class Dataset:
     fasta: Path
     variants: Path
     ds_dir: Path
-    bigwig_table: Optional[Path] = None
+    bigwig_table: Path | None = None
 
 
-DATASETS = {
-    "TCGA-ATAC": Dataset(
+class DatasetEnum(Enum):
+    TCGA_ATAC = Dataset(
         fasta=Path(
             "/cellar/users/dlaub/projects/tcga-atac/data/shared/GRCh38.d1.vd1.fa"
         ),
         variants=Path(
             "/cellar/users/dlaub/projects/tcga-atac/data/shared/merged.norm.bcf"
         ),
-        ds_dir=WDIR / "datasets" / "tcga-atac",
+        ds_dir=ds_dir / "tcga-atac",
         bigwig_table=Path(
             "/carter/shared/data/ml4gland/tcga-atac/data/sample_to_bigwig.csv"
         ),
-    ),
-    "1KGP": Dataset(
-        fasta=WDIR / "GRCh38_full_analysis_set_plus_decoy_hla.fa",
+    )
+    ONE_KGP = Dataset(
+        fasta=Path(
+            "/carter/users/dlaub/data/1kGP/GRCh38_full_analysis_set_plus_decoy_hla.fa"
+        ),
         variants=Path("/carter/users/dlaub/data/1kGP/1kGP.pgen"),
-        ds_dir=WDIR / "datasets" / "1kgp",
-    ),
-    "UKBB": Dataset(
+        ds_dir=ds_dir / "1kgp",
+    )
+    GDC = Dataset(
+        fasta=Path(
+            "/carter/shared/genomes/homo_sapiens/ensembl_grch38.p14_v108/Homo_sapiens.GRCh38.dna.toplevel.fa.bgz"
+        ),
+        variants=Path(
+            "/carter/shared/data/gdc/somatic/wgs_DR45/results/gdc-wgs_DR45.svar"
+        ),
+        ds_dir=ds_dir / "gdc",
+    )
+    UKBB = Dataset(
         fasta=Path(
             "/carter/shared/genomes/homo_sapiens/ensembl_grch37.p13_v107/Homo_sapiens.GRCh37.dna.toplevel.fa.bgz"
         ),
         variants=Path(
             "/carter/shared/projects/InSNPtion/data/ukb/imputed_pgen/autosomes.aligned.name.pgen"
         ),
-        ds_dir=WDIR / "datasets" / "ukbb",
-    ),
-}
-
-DatasetEnum = Enum("DatasetEnum", zip(DATASETS, DATASETS), type=str)
+        ds_dir=ds_dir / "ukbb",
+    )
 
 
 def main(
     dataset: DatasetEnum,
-    hap_results: Optional[Path] = None,
-    track_results: Optional[Path] = None,
-    min_npb: Optional[int] = None,
+    hap_results: Path | None = None,
+    track_results: Path | None = None,
+    min_npb: int | None = None,
     max_npb: int = 2**33,
     overwrite: bool = False,
     bench_haps: bool = True,
     bench_tracks: bool = False,
-    redo_fails: Optional[Path] = None,
+    redo_fails: Path | None = None,
 ):
     from itertools import product
 
     import numpy as np
 
-    ds = DATASETS[dataset.value]
+    ds = dataset.value
     if ds.bigwig_table is None and bench_tracks:
         logger.warning("Ignoring bench-tracks since the dataset does not have them.")
         bench_tracks = False
 
     if hap_results is None:
-        hap_results = (WDIR / "hap_results.csv").resolve()
+        hap_results = (res_dir / "hap_results.csv").resolve()
     else:
         hap_results = hap_results.resolve()
 
     if track_results is None and ds.bigwig_table is not None:
-        track_results = (WDIR / "track_results.csv").resolve()
+        track_results = (res_dir / "track_results.csv").resolve()
     elif track_results is not None and ds.bigwig_table is not None:
         track_results = track_results.resolve()
 
@@ -114,23 +123,25 @@ def main(
             ]
 
             for exp in to_redo:
+                _ds = DatasetEnum(exp.dataset).value
                 npb = exp.seqlen * exp.batch_size
                 n_batches = max(10, -(-(2**29) // npb))
 
                 if exp.type == "haps":
                     launch_bench_haps(
                         hap_results,
-                        DATASETS[exp.dataset].ds_dir / f"seqlen={exp.seqlen}.gvl",
-                        DATASETS[exp.dataset].fasta,
+                        _ds.ds_dir / f"seqlen={exp.seqlen}.gvl",
+                        _ds.fasta,
                         exp.threads,
                         exp.batch_size,
                         n_batches,
                     )
                 elif exp.type == "tracks":
+                    assert track_results is not None
                     launch_bench_tracks(
                         track_results,
-                        DATASETS[exp.dataset].ds_dir / f"seqlen={exp.seqlen}.gvl",
-                        DATASETS[exp.dataset].fasta,
+                        _ds.ds_dir / f"seqlen={exp.seqlen}.gvl",
+                        _ds.fasta,
                         exp.threads,
                         exp.batch_size,
                         n_batches,
@@ -167,6 +178,7 @@ def main(
                         raise e
 
                 if bench_tracks:
+                    assert track_results is not None
                     try:
                         launch_bench_tracks(
                             track_results, ds_path, ds.fasta, t, bs, n_batches
@@ -176,22 +188,24 @@ def main(
                         raise e
 
 
-def write(dataset: Dataset, length: int, overwrite: bool = False, just_chr22=False):
+def write(
+    dataset: Dataset, length: int, overwrite: bool = False, just_chr22: bool = False
+):
     ds_path = dataset.ds_dir / f"seqlen={length}.gvl"
-    if dataset == DATASETS["UKBB"] and length == 1048576 or length == 2048:
+    if dataset == DatasetEnum.UKBB.value and length == 1048576 or length == 2048:
         mem = "256G"
         max_mem = "64G"
     else:
-        mem = "128G"
-        max_mem = "120G"
+        mem = "64G"
+        max_mem = "4G"
     if not ds_path.exists() or overwrite:
         logger.info(f"Writing dataset {ds_path}.")
         bed_fname = f"tile_{length}" + ("_chr22" if just_chr22 else "") + ".bed"
-        bed = WDIR / "beds" / bed_fname
+        bed = proj_dir / "beds" / bed_fname
         cmd = [
             "sbatch",
-            f'--output={WDIR / "out" / f"{ds_path.parent.name}_seqlen={length}.out"}',
-            f'--error={WDIR / "err" / f"{ds_path.parent.name}_seqlen={length}.err"}',
+            f"--output={res_dir / 'out' / f'{ds_path.parent.name}_seqlen={length}.out'}",
+            f"--error={res_dir / 'err' / f'{ds_path.parent.name}_seqlen={length}.err'}",
             "--partition=carter-compute",
             "--cpus-per-task=16",
             f"--mem={mem}",
@@ -224,11 +238,11 @@ def launch_bench_haps(
         "sbatch",
         "--partition=carter-compute",
         f"--cpus-per-task={n_threads}",
-        f"--output={WDIR / 'out' / out_file}",
-        f"--error={WDIR / 'err' / err_file}",
+        f"--output={res_dir / 'out' / out_file}",
+        f"--error={res_dir / 'err' / err_file}",
         "--nodelist=carter-cn-04",
         "--mem=16G",
-        str(WDIR / "benchmark_haps.py"),
+        str(proj_dir / "benchmark_haps.py"),
         str(results),
         str(ds_path),
         str(fasta),
@@ -252,11 +266,11 @@ def launch_bench_tracks(
         "sbatch",
         "--partition=carter-compute",
         f"--cpus-per-task={n_threads}",
-        f"--output={WDIR / 'out' / out_file}",
-        f"--error={WDIR / 'err' / err_file}",
+        f"--output={res_dir / 'out' / out_file}",
+        f"--error={res_dir / 'err' / err_file}",
         "--nodelist=carter-cn-04",
         "--mem=16G",
-        str(WDIR / "benchmark_tracks.py"),
+        str(proj_dir / "benchmark_tracks.py"),
         str(results),
         str(ds_path),
         str(fasta),
@@ -267,4 +281,4 @@ def launch_bench_tracks(
 
 
 if __name__ == "__main__":
-    typer.run(main)
+    cyclopts.run(main)

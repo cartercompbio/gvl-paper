@@ -2,6 +2,7 @@ borzoi/
 data/
 archive/
 gvl-paper.tar.gz
+run_scripts.sh
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
