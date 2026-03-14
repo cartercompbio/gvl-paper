@@ -3,6 +3,14 @@ data/
 archive/
 gvl-paper.tar.gz
 run_scripts.sh
+results/err/
+results/out/
+throughput/configs/
+throughput/work/
+throughput/beds/
+sbox.py
+sbox.ipynb
+.nextflow*
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
