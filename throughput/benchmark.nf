@@ -227,7 +227,7 @@ process MAKE_GRID {
 
 process BENCH_HAPS {
     clusterOptions '--nodelist=carter-cn-04'
-    cpus 64
+    cpus params.test_grid ? 8 : 64
     memory 32.GB * task.attempt
     maxRetries 3
     errorStrategy task.exitStatus in 137..140 ? 'retry' : 'terminate'
@@ -255,7 +255,7 @@ process BENCH_HAPS {
 
 process BENCH_TRACKS {
     clusterOptions '--nodelist=carter-cn-04'
-    cpus 64
+    cpus params.test_grid ? 8 : 64
     memory 32.GB * task.attempt
     maxRetries 3
     errorStrategy task.exitStatus in 137..140 ? 'retry' : 'terminate'
