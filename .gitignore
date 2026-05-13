@@ -7,6 +7,7 @@ results/err/
 results/out/
 throughput/configs/
 throughput/work/
+throughput/.bench_tmp/
 throughput/beds/
 sbox.py
 sbox.ipynb
