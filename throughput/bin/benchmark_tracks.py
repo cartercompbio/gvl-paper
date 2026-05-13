@@ -12,6 +12,7 @@ def bench(
     fasta: Path,
     grid_file: Path,
     dataset: str = "",
+    backend: str = "native",
     burn_in: int = 5,
     replicates: int = 5,
     measure_memory: bool = False,
@@ -40,7 +41,7 @@ def bench(
         from _mem_sampler import PeakRssSampler
 
         with open(results, "w") as f:
-            f.write("dataset,threads,seqlen,batch_size,peak_rss_bytes\n")
+            f.write("dataset,backend,threads,seqlen,batch_size,peak_rss_bytes\n")
             for (n_thread, batch_size, n_batches), _ in product(
                 grid.iter_rows(), range(replicates)
             ):
@@ -56,10 +57,10 @@ def bench(
                 del dl
                 gc.collect()
                 sleep(0.5)
-                f.write(f"{dataset},{n_thread},{length},{batch_size},{s.peak}\n")
+                f.write(f"{dataset},{backend},{n_thread},{length},{batch_size},{s.peak}\n")
     else:
         with open(results, "w") as f:
-            f.write("dataset,threads,seqlen,batch_size,duration\n")
+            f.write("dataset,backend,threads,seqlen,batch_size,duration\n")
             for (n_thread, batch_size, n_batches), _ in product(
                 grid.iter_rows(), range(replicates)
             ):
@@ -76,7 +77,7 @@ def bench(
                             break
                         pass
                 duration = perf_counter_ns() - t0
-                f.write(f"{dataset},{n_thread},{length},{batch_size},{duration}\n")
+                f.write(f"{dataset},{backend},{n_thread},{length},{batch_size},{duration}\n")
 
 
 if __name__ == "__main__":
