@@ -11,9 +11,10 @@ def make_bed(
     output: Path,
     canonical: bool = True,
     n_samples: int | None = None,
-    just_chr22: bool = False,
+    region: str | None = None,
     seed: int | None = 42,
 ):
+    import re
     from typing import cast
 
     import polars as pl
@@ -36,10 +37,20 @@ def make_bed(
             pl.col("Chromosome").str.contains(r"^(chr)?(\d{1,2}|X|Y|MT|M)$")
         )
 
-    if just_chr22:
-        bed = bed.filter(pl.col("Chromosome").str.contains(r"^(chr)?22$"))
+    region_start = 0
+    if region is not None:
+        m = re.fullmatch(r"([^:]+)(?::(\d+)-(\d+))?", region)
+        if m is None:
+            raise ValueError(f"Could not parse region {region!r}; expected 'chrom' or 'chrom:start-end'.")
+        r_chrom, r_start, r_end = m.group(1), m.group(2), m.group(3)
+        bed = bed.filter(pl.col("Chromosome") == r_chrom)
+        if bed.height == 0:
+            raise ValueError(f"Region chromosome {r_chrom!r} not present in {fasta}.fai.")
+        if r_start is not None and r_end is not None:
+            region_start = int(r_start)
+            bed = bed.with_columns(End=pl.col("End").clip(upper_bound=int(r_end)))
 
-    bed = pr.PyRanges(bed.with_columns(Start=0).to_pandas()).tile_ranges(length)
+    bed = pr.PyRanges(bed.with_columns(Start=region_start).to_pandas()).tile_ranges(length)
     bed = cast(pl.DataFrame, pl.from_pandas(bed))
     assert ((bed["End"] - bed["Start"]) == length).all()
 

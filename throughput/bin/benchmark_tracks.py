@@ -10,17 +10,17 @@ def bench(
     ds_path: Path,
     length: int,
     fasta: Path,
-    batch_size: int,
-    n_batches: int,
+    grid_file: Path,
     burn_in: int = 5,
     replicates: int = 5,
 ):
     import os
-    from time import perf_counter
-    from typing import List
+    from itertools import product
+    from time import perf_counter_ns
 
     import genvarloader as gvl
-    from filelock import FileLock
+    import numba as nb
+    import polars as pl
 
     ds = (
         gvl.Dataset.open(ds_path, fasta)
@@ -28,37 +28,30 @@ def bench(
         .with_len(length)
     )
     dataset = ds_path.parent.name
-    dl = ds.to_dataloader(batch_size=batch_size, shuffle=False)
 
-    throughputs: List[float] = []
-    for _ in range(replicates):
-        n_yielded = 0
-        n_nucleotides: int = 0
-        t0 = perf_counter()
-        while n_yielded < n_batches + burn_in:
-            for batch in dl:
-                if n_yielded == burn_in:
-                    t0 = perf_counter()
-                if n_yielded >= burn_in:
-                    n_nucleotides += batch.numel()
-                n_yielded += 1
-                if n_yielded >= n_batches:
-                    break
-                pass
-        seconds = perf_counter() - t0
-        throughputs.append(n_nucleotides / seconds / 2**20 * batch.element_size())  # type: ignore
+    max_threads = len(os.sched_getaffinity(0))
+    grid = pl.read_csv(grid_file)
+    assert int(grid["threads"].max()) <= max_threads  # type: ignore
 
-    threads = len(os.sched_getaffinity(0))
-    header = "dataset,threads,seqlen,batch_size,throughput\n"
-    result = f"{dataset},{threads},{length},{batch_size},{throughputs}\n"
-    with FileLock(results.with_suffix(".lock")):
-        if results.exists():
-            with open(results, "a") as f:
-                f.write(result)
-        else:
-            with open(results, "w") as f:
-                f.write(header)
-                f.write(result)
+    with open(results, "w") as f:
+        f.write("dataset,threads,seqlen,batch_size,duration\n")
+        for (n_thread, batch_size, n_batches), _ in product(
+            grid.iter_rows(), range(replicates)
+        ):
+            nb.set_num_threads(n_thread)
+            dl = ds.to_dataloader(batch_size=batch_size, shuffle=False)
+            n_yielded = 0
+            t0 = perf_counter_ns()
+            while n_yielded < n_batches + burn_in:
+                for batch in dl:
+                    if n_yielded == burn_in:
+                        t0 = perf_counter_ns()
+                    n_yielded += 1
+                    if n_yielded >= n_batches:
+                        break
+                    pass
+            duration = perf_counter_ns() - t0
+            f.write(f"{dataset},{n_thread},{length},{batch_size},{duration}\n")
 
 
 if __name__ == "__main__":

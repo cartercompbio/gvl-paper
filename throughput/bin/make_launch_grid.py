@@ -59,10 +59,26 @@ def main(
     max_npb: int = 2**33,
     n_threads_powers: list[int] | None = None,
     output: Path | None = None,
+    test: bool = False,
 ):
     import polars as pl
 
-    """Generate launch grid JSON for throughput benchmarks."""
+    """Generate launch grid CSV for throughput benchmarks.
+
+    With ``--test``, emit a tiny grid (threads in {1, 8}, batch_size in
+    {1, 32}, n_batches=10) for quick smoke runs.
+    """
+    if test:
+        grid = [
+            {"threads": t, "batch_size": bs, "n_batches": 10}
+            for t in (1, 8)
+            for bs in (1, 32)
+        ]
+        if output is None:
+            output = Path.cwd() / f"grid_{length}.csv"
+        pl.from_dicts(grid).write_csv(output)
+        return
+
     if n_threads_powers is None:
         n_threads_powers = list(range(7))
 
