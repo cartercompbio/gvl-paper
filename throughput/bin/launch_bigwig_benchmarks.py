@@ -14,6 +14,7 @@ def main(
     ),
     results: Path = WDIR / "pybigwig_results.csv",
     max_nucleotides: int = 2**25,
+    measure_memory: bool = False,
 ):
     from itertools import product
 
@@ -31,7 +32,9 @@ def main(
         npb = length * batch_size
         n_batches = max(20, -(-max_nucleotides // npb))
         try:
-            launch_bench(results, bigwig_table, length, threads, batch_size, n_batches)
+            launch_bench(
+                results, bigwig_table, length, threads, batch_size, n_batches, measure_memory
+            )
         except CalledProcessError as e:
             print(e.stdout, e.stderr)
             raise e
@@ -44,6 +47,7 @@ def launch_bench(
     n_threads: int,
     batch_size: int,
     n_batches: int,
+    measure_memory: bool = False,
 ):
     stem = f"bigwig_threads={n_threads}_seqlen={length}_bs={batch_size}"
     out_file = f"{stem}.out"
@@ -63,6 +67,8 @@ def launch_bench(
         f"--bigwig-table={bigwig_table}",
         f"--results={results}",
     ]
+    if measure_memory:
+        cmd.append("--measure-memory")
     run(cmd, check=True)
 
 

@@ -15,6 +15,7 @@ def main(
     results: Path = WDIR / "ref_results.csv",
     max_nucleotides: int = 2**25,
     bench: bool = True,
+    measure_memory: bool = False,
 ):
     from itertools import product
 
@@ -33,7 +34,9 @@ def main(
             npb = length * batch_size
             n_batches = max(20, -(-max_nucleotides // npb))
             try:
-                launch_bench(results, fasta, length, threads, batch_size, n_batches)
+                launch_bench(
+                    results, fasta, length, threads, batch_size, n_batches, measure_memory
+                )
             except CalledProcessError as e:
                 print(e.stdout, e.stderr)
                 raise e
@@ -46,6 +49,7 @@ def launch_bench(
     n_threads: int,
     batch_size: int,
     n_batches: int,
+    measure_memory: bool = False,
 ):
     stem = f"reference_threads={n_threads}_seqlen={length}_bs={batch_size}"
     out_file = f"{stem}.out"
@@ -67,6 +71,8 @@ def launch_bench(
         "--results",
         str(results),
     ]
+    if measure_memory:
+        cmd.append("--measure-memory")
     run(cmd, check=True)
 
 

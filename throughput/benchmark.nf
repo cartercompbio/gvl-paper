@@ -16,6 +16,7 @@ params {
     test_grid: Boolean = false
     bench_haps: Boolean = true
     bench_tracks: Boolean = false
+    measure_memory: Boolean = false
     results_dir: String = "${projectDir}/results"
 }
 
@@ -77,12 +78,14 @@ output {
     }
     haps_results: Channel<BenchResult> {
         path { r ->
-            r.csv >> "${params.results_dir}/haps/${params.dataset}_${r.length}.csv"
+            def sub = params.measure_memory ? "haps_memory" : "haps"
+            r.csv >> "${params.results_dir}/${sub}/${params.dataset}_${r.length}.csv"
         }
     }
     tracks_results: Channel<BenchResult> {
         path { r ->
-            r.csv >> "${params.results_dir}/tracks/${params.dataset}_${r.length}.csv"
+            def sub = params.measure_memory ? "tracks_memory" : "tracks"
+            r.csv >> "${params.results_dir}/${sub}/${params.dataset}_${r.length}.csv"
         }
     }
 }
@@ -159,13 +162,15 @@ process BENCH_HAPS {
     record(length: spec.length, csv: file("results_${spec.length}.csv"))
 
     script:
+    mem_flag = params.measure_memory ? "--measure-memory" : ""
     """
     benchmark_haps.py \\
       results_${spec.length}.csv \\
       ${spec.gvl} \\
       ${spec.length} \\
       ${params.fasta} \\
-      ${spec.grid}
+      ${spec.grid} \\
+      --dataset ${params.dataset} ${mem_flag}
     """
 }
 
@@ -184,12 +189,14 @@ process BENCH_TRACKS {
     record(length: spec.length, csv: file("results_${spec.length}.csv"))
 
     script:
+    mem_flag = params.measure_memory ? "--measure-memory" : ""
     """
     benchmark_tracks.py \\
       results_${spec.length}.csv \\
       ${spec.gvl} \\
       ${spec.length} \\
       ${params.fasta} \\
-      ${spec.grid}
+      ${spec.grid} \\
+      --dataset ${params.dataset} ${mem_flag}
     """
 }

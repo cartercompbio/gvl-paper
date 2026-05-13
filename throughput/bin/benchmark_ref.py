@@ -14,6 +14,7 @@ def main(
     results: Path,
     burn_in: int = 5,
     replicates: int = 5,
+    measure_memory: bool = False,
 ):
     import os
     from time import perf_counter
@@ -73,33 +74,55 @@ def main(
     ds = Ref(fasta, bed, n_samples)
     dl = DataLoader(ds, batch_size=batch_size, num_workers=num_workers)
 
-    throughputs: List[float] = []
-    for _ in range(replicates):
-        n_yielded = 0
-        n_nucleotides: int = 0
-        t0 = perf_counter()
-        while n_yielded < n_batches + burn_in:
-            for batch in dl:
-                if n_yielded == burn_in:
-                    t0 = perf_counter()
-                if n_yielded >= burn_in:
-                    n_nucleotides += batch.numel()
-                n_yielded += 1
-                if n_yielded >= n_batches:
-                    break
-                pass
-        seconds = perf_counter() - t0
-        throughputs.append(n_nucleotides / seconds / 2**20)
+    if measure_memory:
+        from _mem_sampler import PeakRssSampler
 
-    result = f"FASTA,{threads},{length},{batch_size},{throughputs}"
-    with FileLock(results.with_suffix(".lock")):
-        if results.exists():
-            with open(results, "a") as f:
-                f.write(result + "\n")
-        else:
-            with open(results, "w") as f:
-                f.write("dataset,threads,seqlen,batch_size,throughput\n")
-                f.write(result + "\n")
+        with PeakRssSampler() as s:
+            for _ in range(replicates):
+                n_yielded = 0
+                while n_yielded < n_batches + burn_in:
+                    for batch in dl:
+                        n_yielded += 1
+                        if n_yielded >= n_batches:
+                            break
+
+        result = f"FASTA,{threads},{length},{batch_size},{s.peak}"
+        with FileLock(results.with_suffix(".lock")):
+            if results.exists():
+                with open(results, "a") as f:
+                    f.write(result + "\n")
+            else:
+                with open(results, "w") as f:
+                    f.write("dataset,threads,seqlen,batch_size,peak_rss_bytes\n")
+                    f.write(result + "\n")
+    else:
+        throughputs: List[float] = []
+        for _ in range(replicates):
+            n_yielded = 0
+            n_nucleotides: int = 0
+            t0 = perf_counter()
+            while n_yielded < n_batches + burn_in:
+                for batch in dl:
+                    if n_yielded == burn_in:
+                        t0 = perf_counter()
+                    if n_yielded >= burn_in:
+                        n_nucleotides += batch.numel()
+                    n_yielded += 1
+                    if n_yielded >= n_batches:
+                        break
+                    pass
+            seconds = perf_counter() - t0
+            throughputs.append(n_nucleotides / seconds / 2**20)
+
+        result = f"FASTA,{threads},{length},{batch_size},{throughputs}"
+        with FileLock(results.with_suffix(".lock")):
+            if results.exists():
+                with open(results, "a") as f:
+                    f.write(result + "\n")
+            else:
+                with open(results, "w") as f:
+                    f.write("dataset,threads,seqlen,batch_size,throughput\n")
+                    f.write(result + "\n")
 
 
 if __name__ == "__main__":
