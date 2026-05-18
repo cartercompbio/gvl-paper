@@ -20,6 +20,7 @@ params {
 workflow {
 
     main:
+    n_full = COUNT_FULL_SAMPLES(params.svar)
     lengths = channel.fromList(params.query_lengths)
     pairs = GENERATE_PAIRS(
         lengths,
@@ -93,6 +94,24 @@ output {
             r.pdf >> "memory_plot.pdf"
         }
     }
+}
+
+process COUNT_FULL_SAMPLES {
+    queue 'carter-compute'
+    cpus 1
+    time 30.min
+    memory 8.GB
+
+    input:
+    svar: Path
+
+    output:
+    n: Integer = stdout().trim().toInteger()
+
+    script:
+    """
+    make_sample_list.py ${svar} /dev/null --print-total
+    """
 }
 
 process GENERATE_PAIRS {
