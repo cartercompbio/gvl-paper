@@ -25,7 +25,7 @@ workflow {
     main:
     n_full = COUNT_FULL_SAMPLES(params.svar)
     lengths = channel.fromList(params.query_lengths)
-    pairs = GENERATE_PAIRS(
+    pairs_raw = GENERATE_PAIRS(
         lengths,
         params.n_replicates,
         params.max_pairs,
@@ -33,6 +33,16 @@ workflow {
         params.max_total_length,
         n_full,
     )
+    pairs = pairs_raw.map { r ->
+        record(
+            query_length: r.query_length,
+            n_samples: r.n_samples,
+            pairs: r.pairs,
+            svar: params.svar,
+            bcf: params.bcf,
+            pgen: params.pgen,
+        ) as SweepInput
+    }
 
     n_channel = channel.fromList(params.sample_sizes)
 
@@ -184,9 +194,6 @@ process GENERATE_PAIRS {
         query_length: query_length,
         n_samples: n_samples_full,
         pairs: file("pairs_${query_length}.parquet"),
-        svar: file("${params.svar}"),
-        bcf: file("${params.bcf}"),
-        pgen: file("${params.pgen}"),
     )
 
     script:
