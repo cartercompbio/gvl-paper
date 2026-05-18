@@ -38,8 +38,18 @@ workflow {
 
     sample_lists = MAKE_SAMPLE_LIST(n_channel, params.sample_seed, params.svar)
 
+    pgen_stem = params.pgen.toString().replaceAll(/\.pgen$/, '')
+    pvar_path = file("${pgen_stem}.pvar")
+    psam_path = file("${pgen_stem}.psam")
+
     subset_bcf_out  = SUBSET_BCF (sample_lists.map { r -> r.n }, sample_lists.map { r -> r.samples }, params.bcf)
-    subset_pgen_out = SUBSET_PGEN(sample_lists.map { r -> r.n }, sample_lists.map { r -> r.samples }, params.pgen)
+    subset_pgen_out = SUBSET_PGEN(
+        sample_lists.map { r -> r.n },
+        sample_lists.map { r -> r.samples },
+        params.pgen,
+        pvar_path,
+        psam_path,
+    )
     svar_out        = BUILD_SVAR_FROM_PGEN(
         subset_pgen_out.map { r -> r.n },
         subset_pgen_out.map { r -> r.pgen },
@@ -244,9 +254,13 @@ process SUBSET_PGEN {
     n: Integer
     samples: Path
     pgen: Path
+    pvar: Path
+    psam: Path
 
     stage:
     stageAs pgen, 'in.pgen'
+    stageAs pvar, 'in.pvar'
+    stageAs psam, 'in.psam'
 
     output:
     record(
@@ -259,9 +273,6 @@ process SUBSET_PGEN {
     script:
     """
     awk 'BEGIN{OFS="\\t"} {print "0", \$1}' ${samples} > keep.tsv
-    pgen_stem=\$(basename in.pgen .pgen)
-    ln -sf ${pgen.parent}/\${pgen_stem}.pvar in.pvar
-    ln -sf ${pgen.parent}/\${pgen_stem}.psam in.psam
     plink2 --pfile in --keep keep.tsv --make-pgen --threads ${task.cpus} --out N${n}
     """
 }
