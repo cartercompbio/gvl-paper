@@ -120,6 +120,9 @@ output {
             r.setup_png >> "setup_plot.png"
             r.setup_svg >> "setup_plot.svg"
             r.setup_pdf >> "setup_plot.pdf"
+            if (r.n_plot_png) r.n_plot_png >> "n_plot.png"
+            if (r.n_plot_svg) r.n_plot_svg >> "n_plot.svg"
+            if (r.n_plot_pdf) r.n_plot_pdf >> "n_plot.pdf"
         }
     }
     memory_plots: Value<MemoryPlots> {
@@ -127,6 +130,9 @@ output {
             r.png >> "memory_plot.png"
             r.svg >> "memory_plot.svg"
             r.pdf >> "memory_plot.pdf"
+            if (r.n_png) r.n_png >> "n_memory_plot.png"
+            if (r.n_svg) r.n_svg >> "n_memory_plot.svg"
+            if (r.n_pdf) r.n_pdf >> "n_memory_plot.pdf"
         }
     }
 }
@@ -577,6 +583,9 @@ process PLOT_THROUGHPUT {
         setup_png: file("setup_plot.png"),
         setup_svg: file("setup_plot.svg"),
         setup_pdf: file("setup_plot.pdf"),
+        n_plot_png: file("n_plot.png", optional: true),
+        n_plot_svg: file("n_plot.svg", optional: true),
+        n_plot_pdf: file("n_plot.pdf", optional: true),
     )
 }
 
@@ -592,7 +601,14 @@ process PLOT_MEMORY {
     """
 
     output:
-    record(png: file("memory_plot.png"), svg: file("memory_plot.svg"), pdf: file("memory_plot.pdf"))
+    record(
+        png: file("memory_plot.png"),
+        svg: file("memory_plot.svg"),
+        pdf: file("memory_plot.pdf"),
+        n_png: file("n_memory_plot.png", optional: true),
+        n_svg: file("n_memory_plot.svg", optional: true),
+        n_pdf: file("n_memory_plot.pdf", optional: true),
+    )
 }
 
 record ThroughputPlots {
@@ -602,12 +618,18 @@ record ThroughputPlots {
     setup_png: Path
     setup_svg: Path
     setup_pdf: Path
+    n_plot_png: Path?
+    n_plot_svg: Path?
+    n_plot_pdf: Path?
 }
 
 record MemoryPlots {
     png: Path
     svg: Path
     pdf: Path
+    n_png: Path?
+    n_svg: Path?
+    n_pdf: Path?
 }
 
 record SubsetTriple {
