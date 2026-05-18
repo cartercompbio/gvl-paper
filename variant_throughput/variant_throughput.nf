@@ -141,7 +141,7 @@ process COUNT_FULL_SAMPLES {
     queue 'carter-compute'
     cpus 1
     time 30.min
-    memory 8.GB
+    memory 32.GB
 
     input:
     svar: Path
@@ -197,7 +197,7 @@ process MAKE_SAMPLE_LIST {
     queue 'carter-compute'
     cpus 1
     time 30.min
-    memory 8.GB
+    memory 32.GB
 
     input:
     n: Integer
