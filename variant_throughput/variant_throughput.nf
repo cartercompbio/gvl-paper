@@ -15,6 +15,9 @@ params {
     max_total_length: Integer = 16777216
     query_lengths: List<Integer> = [2048, 4096, 8192, 16384, 32768, 65536, 131072, 262144, 524288, 1048576, 2097152, 4194304, 8388608, 16777216]
     use_custom_pack: Boolean = true
+    sample_sizes: List<Integer> = [10, 32, 100, 316, 1000, 3202]
+    n_sweep_query_length: Integer = 131072
+    sample_seed: Integer = 0
 }
 
 workflow {
@@ -31,17 +34,49 @@ workflow {
         n_full,
     )
 
+    n_channel = channel.fromList(params.sample_sizes)
+
+    sample_lists = MAKE_SAMPLE_LIST(n_channel, params.sample_seed, params.svar)
+
+    subset_bcf_out  = SUBSET_BCF (sample_lists.map { r -> r.n }, sample_lists.map { r -> r.samples }, params.bcf)
+    subset_pgen_out = SUBSET_PGEN(sample_lists.map { r -> r.n }, sample_lists.map { r -> r.samples }, params.pgen)
+    svar_out        = BUILD_SVAR_FROM_PGEN(
+        subset_pgen_out.map { r -> r.n },
+        subset_pgen_out.map { r -> r.pgen },
+        subset_pgen_out.map { r -> r.pvar },
+        subset_pgen_out.map { r -> r.psam },
+    )
+
+    triples = svar_out
+        .map { r -> tuple(r.n, r.svar) }
+        .join(subset_bcf_out.map { r -> tuple(r.n, r.bcf) },  by: 0)
+        .join(subset_pgen_out.map { r -> tuple(r.n, r.pgen) }, by: 0)
+        .map { n, svar, bcf, pgen ->
+            record(n: n, svar: svar, bcf: bcf, pgen: pgen) as SubsetTriple
+        }
+
+    n_pairs = GENERATE_PAIRS_N(
+        triples,
+        params.n_sweep_query_length,
+        params.n_replicates,
+        params.max_pairs,
+        params.seed,
+        params.max_total_length,
+    )
+
+    all_inputs = pairs.mix(n_pairs)
+
     // Throughput track
-    svar_t = BENCH_SVAR_THROUGHPUT(pairs)
-    bcf_t = BENCH_BCF_THROUGHPUT(pairs)
-    pgen_t = BENCH_PGEN_THROUGHPUT(pairs)
-    presub_t = BENCH_PRESUBSET_BCF_THROUGHPUT(pairs)
+    svar_t = BENCH_SVAR_THROUGHPUT(all_inputs)
+    bcf_t = BENCH_BCF_THROUGHPUT(all_inputs)
+    pgen_t = BENCH_PGEN_THROUGHPUT(all_inputs)
+    presub_t = BENCH_PRESUBSET_BCF_THROUGHPUT(all_inputs)
 
     // Memory track (runs in parallel with throughput)
-    svar_m = BENCH_SVAR_MEMORY(pairs)
-    bcf_m = BENCH_BCF_MEMORY(pairs)
-    pgen_m = BENCH_PGEN_MEMORY(pairs)
-    presub_m = BENCH_PRESUBSET_BCF_MEMORY(pairs)
+    svar_m = BENCH_SVAR_MEMORY(all_inputs)
+    bcf_m = BENCH_BCF_MEMORY(all_inputs)
+    pgen_m = BENCH_PGEN_MEMORY(all_inputs)
+    presub_m = BENCH_PRESUBSET_BCF_MEMORY(all_inputs)
 
     throughput_grouped = svar_t
         .mix(bcf_t)
@@ -145,6 +180,143 @@ process GENERATE_PAIRS {
       ${params.fai} \\
       ${query_length} \\
       pairs_${query_length}.parquet \\
+      --seed ${seed} \\
+      --n-replicates ${n_replicates} \\
+      --max-pairs ${max_pairs} \\
+      --max-total-length ${max_total_length}
+    """
+}
+
+process MAKE_SAMPLE_LIST {
+    queue 'carter-compute'
+    cpus 1
+    time 30.min
+    memory 8.GB
+
+    input:
+    n: Integer
+    seed: Integer
+    svar: Path
+
+    output:
+    record(n: n, samples: file("samples_N${n}.txt"))
+
+    script:
+    """
+    make_sample_list.py ${svar} samples_N${n}.txt --n ${n} --seed ${seed}
+    """
+}
+
+process SUBSET_BCF {
+    queue 'carter-compute'
+    cpus 4
+    time 4.h
+    memory 16.GB
+
+    input:
+    n: Integer
+    samples: Path
+    bcf: Path
+
+    output:
+    record(n: n, bcf: file("N${n}.bcf"), csi: file("N${n}.bcf.csi"))
+
+    script:
+    """
+    bcftools view -S ${samples} --force-samples --no-update --threads ${task.cpus} -Ob -o N${n}.bcf ${bcf}
+    bcftools index --threads ${task.cpus} N${n}.bcf
+    """
+}
+
+process SUBSET_PGEN {
+    queue 'carter-compute'
+    cpus 4
+    time 4.h
+    memory 16.GB
+
+    input:
+    n: Integer
+    samples: Path
+    pgen: Path
+
+    stage:
+    stageAs pgen, 'in.pgen'
+
+    output:
+    record(
+        n: n,
+        pgen: file("N${n}.pgen"),
+        pvar: file("N${n}.pvar"),
+        psam: file("N${n}.psam"),
+    )
+
+    script:
+    """
+    awk 'BEGIN{OFS="\\t"} {print "0", \$1}' ${samples} > keep.tsv
+    pgen_stem=\$(basename in.pgen .pgen)
+    ln -sf ${pgen.parent}/\${pgen_stem}.pvar in.pvar
+    ln -sf ${pgen.parent}/\${pgen_stem}.psam in.psam
+    plink2 --pfile in --keep keep.tsv --make-pgen --threads ${task.cpus} --out N${n}
+    """
+}
+
+process BUILD_SVAR_FROM_PGEN {
+    queue 'carter-compute'
+    clusterOptions '--nodelist=carter-cn-04'
+    cpus 8
+    time 8.h
+    memory 64.GB
+
+    input:
+    n: Integer
+    pgen: Path
+    pvar: Path
+    psam: Path
+
+    output:
+    record(n: n, svar: file("N${n}.svar"))
+
+    script:
+    """
+    python - <<'PY'
+from pathlib import Path
+from genoray import SparseVar
+SparseVar.from_pgen(Path("${pgen}"), Path("N${n}.svar"))
+PY
+    """
+}
+
+process GENERATE_PAIRS_N {
+    queue 'carter-compute'
+    cpus 2
+    time 2.h
+    memory 16.GB
+
+    input:
+    t: SubsetTriple
+    query_length: Integer
+    n_replicates: Integer
+    max_pairs: Integer
+    seed: Integer
+    max_total_length: Integer
+
+    output:
+    record(
+        query_length: query_length,
+        n_samples: t.n,
+        pairs: file("pairs_N${t.n}.parquet"),
+        svar: t.svar,
+        bcf: t.bcf,
+        pgen: t.pgen,
+    )
+
+    script:
+    """
+    generate_pairs.py \\
+      ${t.svar} \\
+      ${params.fai} \\
+      ${query_length} \\
+      pairs_N${t.n}.parquet \\
       --seed ${seed} \\
       --n-replicates ${n_replicates} \\
       --max-pairs ${max_pairs} \\
@@ -436,6 +608,13 @@ record MemoryPlots {
     png: Path
     svg: Path
     pdf: Path
+}
+
+record SubsetTriple {
+    n: Integer
+    svar: Path
+    bcf: Path
+    pgen: Path
 }
 
 record SweepInput {
