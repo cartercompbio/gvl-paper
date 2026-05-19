@@ -33,6 +33,7 @@ workflow {
         params.max_total_length,
         n_full,
     )
+    bcf_csi_path = file("${params.bcf}.csi")
     pairs = pairs_raw.map { r ->
         record(
             query_length: r.query_length,
@@ -40,6 +41,7 @@ workflow {
             pairs: r.pairs,
             svar: params.svar,
             bcf: params.bcf,
+            bcf_csi: bcf_csi_path,
             pgen: params.pgen,
         ) as SweepInput
     }
@@ -69,10 +71,10 @@ workflow {
 
     triples = svar_out
         .map { r -> tuple(r.n, r.svar) }
-        .join(subset_bcf_out.map { r -> tuple(r.n, r.bcf) },  by: 0)
+        .join(subset_bcf_out.map { r -> tuple(r.n, r.bcf, r.csi) }, by: 0)
         .join(subset_pgen_out.map { r -> tuple(r.n, r.pgen) }, by: 0)
-        .map { n, svar, bcf, pgen ->
-            record(n: n, svar: svar, bcf: bcf, pgen: pgen) as SubsetTriple
+        .map { n, svar, bcf, csi, pgen ->
+            record(n: n, svar: svar, bcf: bcf, bcf_csi: csi, pgen: pgen) as SubsetTriple
         }
 
     n_pairs = GENERATE_PAIRS_N(
@@ -336,6 +338,7 @@ process GENERATE_PAIRS_N {
         pairs: file("pairs_N${t.n}.parquet"),
         svar: t.svar,
         bcf: t.bcf,
+        bcf_csi: t.bcf_csi,
         pgen: t.pgen,
     )
 
@@ -659,6 +662,7 @@ record SubsetTriple {
     n: Integer
     svar: Path
     bcf: Path
+    bcf_csi: Path
     pgen: Path
 }
 
@@ -668,6 +672,7 @@ record SweepInput {
     pairs: Path
     svar: Path
     bcf: Path
+    bcf_csi: Path
     pgen: Path
 }
 
