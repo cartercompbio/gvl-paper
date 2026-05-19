@@ -57,7 +57,7 @@ workflow {
 
     sample_lists = MAKE_SAMPLE_LIST(n_channel, params.sample_seed, params.svar)
 
-    subset_bcf_out  = SUBSET_BCF (sample_lists.map { r -> r.n }, sample_lists.map { r -> r.samples }, params.bcf)
+    subset_bcf_out = SUBSET_BCF(sample_lists.map { r -> r.n }, sample_lists.map { r -> r.samples }, params.bcf)
     subset_pgen_out = SUBSET_PGEN(
         sample_lists.map { r -> r.n },
         sample_lists.map { r -> r.samples },
@@ -65,7 +65,7 @@ workflow {
         pvar_path,
         psam_path,
     )
-    svar_out        = BUILD_SVAR_FROM_PGEN(
+    svar_out = BUILD_SVAR_FROM_PGEN(
         subset_pgen_out.map { r -> r.n },
         subset_pgen_out.map { r -> r.pgen },
         subset_pgen_out.map { r -> r.pvar },
@@ -179,13 +179,13 @@ process COUNT_FULL_SAMPLES {
     input:
     svar: Path
 
-    output:
-    n: Integer = stdout().trim().toInteger()
-
     script:
     """
     make_sample_list.py ${svar} /dev/null --print-total
     """
+
+    output:
+    n: Integer = stdout().trim().toInteger()
 }
 
 process GENERATE_PAIRS {
@@ -202,13 +202,6 @@ process GENERATE_PAIRS {
     max_total_length: Integer
     n_samples_full: Integer
 
-    output:
-    record(
-        query_length: query_length,
-        n_samples: n_samples_full,
-        pairs: file("pairs_${query_length}.parquet"),
-    )
-
     script:
     """
     generate_pairs.py \\
@@ -221,6 +214,13 @@ process GENERATE_PAIRS {
       --max-pairs ${max_pairs} \\
       --max-total-length ${max_total_length}
     """
+
+    output:
+    record(
+        query_length: query_length,
+        n_samples: n_samples_full,
+        pairs: file("pairs_${query_length}.parquet"),
+    )
 }
 
 process MAKE_SAMPLE_LIST {
@@ -234,13 +234,13 @@ process MAKE_SAMPLE_LIST {
     seed: Integer
     svar: Path
 
-    output:
-    record(n: n, samples: file("samples_N${n}.txt"))
-
     script:
     """
     make_sample_list.py ${svar} samples_N${n}.txt --n ${n} --seed ${seed}
     """
+
+    output:
+    record(n: n, samples: file("samples_N${n}.txt"))
 }
 
 process SUBSET_BCF {
@@ -254,14 +254,13 @@ process SUBSET_BCF {
     samples: Path
     bcf: Path
 
-    output:
-    record(n: n, bcf: file("N${n}.bcf"), csi: file("N${n}.bcf.csi"))
-
     script:
     """
-    bcftools view -S ${samples} --force-samples --no-update --threads ${task.cpus} -Ob -o N${n}.bcf ${bcf}
-    bcftools index --threads ${task.cpus} N${n}.bcf
+    bcftools view -S ${samples} -c 1 --no-update --threads ${task.cpus} -W -Ob -o N${n}.bcf ${bcf}
     """
+
+    output:
+    record(n: n, bcf: file("N${n}.bcf"), csi: file("N${n}.bcf.csi"))
 }
 
 process SUBSET_PGEN {
@@ -282,6 +281,12 @@ process SUBSET_PGEN {
     stageAs pvar, 'in.pvar'
     stageAs psam, 'in.psam'
 
+    script:
+    """
+    awk 'BEGIN{OFS="\\t"} {print "0", \$1}' ${samples} > keep.tsv
+    plink2 --pfile in --keep keep.tsv --mac 1 --nonfounders --make-pgen --threads ${task.cpus} --out N${n}
+    """
+
     output:
     record(
         n: n,
@@ -289,12 +294,6 @@ process SUBSET_PGEN {
         pvar: file("N${n}.pvar"),
         psam: file("N${n}.psam"),
     )
-
-    script:
-    """
-    awk 'BEGIN{OFS="\\t"} {print "0", \$1}' ${samples} > keep.tsv
-    plink2 --pfile in --keep keep.tsv --make-pgen --threads ${task.cpus} --out N${n}
-    """
 }
 
 process BUILD_SVAR_FROM_PGEN {
@@ -310,22 +309,13 @@ process BUILD_SVAR_FROM_PGEN {
     pvar: Path
     psam: Path
 
-    output:
-    record(n: n, svar: file("N${n}.svar"))
-
     script:
     """
-    python - <<'PY'
-from pathlib import Path
-from genoray import SparseVar, PGEN
-SparseVar.from_pgen(
-    Path("N${n}.svar"),
-    PGEN(Path("${pgen}")),
-    max_mem="96G",
-    n_jobs=${task.cpus},
-)
-PY
+    genoray write ${pgen} N${n}.svar --threads ${task.cpus}
     """
+
+    output:
+    record(n: n, svar: file("N${n}.svar"))
 }
 
 process GENERATE_PAIRS_N {
@@ -342,19 +332,6 @@ process GENERATE_PAIRS_N {
     seed: Integer
     max_total_length: Integer
 
-    output:
-    record(
-        query_length: query_length,
-        n_samples: t.n,
-        pairs: file("pairs_N${t.n}.parquet"),
-        svar: t.svar,
-        bcf: t.bcf,
-        bcf_csi: t.bcf_csi,
-        pgen: t.pgen,
-        pvar: t.pvar,
-        psam: t.psam,
-    )
-
     script:
     """
     generate_pairs.py \\
@@ -367,6 +344,19 @@ process GENERATE_PAIRS_N {
       --max-pairs ${max_pairs} \\
       --max-total-length ${max_total_length}
     """
+
+    output:
+    record(
+        query_length: query_length,
+        n_samples: t.n,
+        pairs: file("pairs_N${t.n}.parquet"),
+        svar: t.svar,
+        bcf: t.bcf,
+        bcf_csi: t.bcf_csi,
+        pgen: t.pgen,
+        pvar: t.pvar,
+        psam: t.psam,
+    )
 }
 
 process BENCH_SVAR_THROUGHPUT {
@@ -378,9 +368,6 @@ process BENCH_SVAR_THROUGHPUT {
 
     input:
     p: SweepInput
-
-    output:
-    record(method: "svar", csv: file("svar_q${p.query_length}_n${p.n_samples}_throughput.csv"))
 
     script:
     pack_flag = params.use_custom_pack ? "--use-custom-pack" : "--no-use-custom-pack"
@@ -394,6 +381,9 @@ process BENCH_SVAR_THROUGHPUT {
       ${pack_flag} \\
       --n-samples ${p.n_samples}
     """
+
+    output:
+    record(method: "svar", csv: file("svar_q${p.query_length}_n${p.n_samples}_throughput.csv"))
 }
 
 process BENCH_SVAR_MEMORY {
@@ -405,9 +395,6 @@ process BENCH_SVAR_MEMORY {
 
     input:
     p: SweepInput
-
-    output:
-    record(method: "svar", csv: file("svar_q${p.query_length}_n${p.n_samples}_memory.csv"))
 
     script:
     pack_flag = params.use_custom_pack ? "--use-custom-pack" : "--no-use-custom-pack"
@@ -421,6 +408,9 @@ process BENCH_SVAR_MEMORY {
       ${pack_flag} \\
       --n-samples ${p.n_samples}
     """
+
+    output:
+    record(method: "svar", csv: file("svar_q${p.query_length}_n${p.n_samples}_memory.csv"))
 }
 
 process BENCH_BCF_THROUGHPUT {
@@ -433,9 +423,6 @@ process BENCH_BCF_THROUGHPUT {
     input:
     p: SweepInput
 
-    output:
-    record(method: "bcf", csv: file("bcf_q${p.query_length}_n${p.n_samples}_throughput.csv"))
-
     script:
     """
     bench_bcf.py \\
@@ -446,6 +433,9 @@ process BENCH_BCF_THROUGHPUT {
       --mode throughput \\
       --n-samples ${p.n_samples}
     """
+
+    output:
+    record(method: "bcf", csv: file("bcf_q${p.query_length}_n${p.n_samples}_throughput.csv"))
 }
 
 process BENCH_BCF_MEMORY {
@@ -458,9 +448,6 @@ process BENCH_BCF_MEMORY {
     input:
     p: SweepInput
 
-    output:
-    record(method: "bcf", csv: file("bcf_q${p.query_length}_n${p.n_samples}_memory.csv"))
-
     script:
     """
     bench_bcf.py \\
@@ -471,6 +458,9 @@ process BENCH_BCF_MEMORY {
       --mode memory \\
       --n-samples ${p.n_samples}
     """
+
+    output:
+    record(method: "bcf", csv: file("bcf_q${p.query_length}_n${p.n_samples}_memory.csv"))
 }
 
 process BENCH_PGEN_THROUGHPUT {
@@ -483,9 +473,6 @@ process BENCH_PGEN_THROUGHPUT {
     input:
     p: SweepInput
 
-    output:
-    record(method: "pgen", csv: file("pgen_q${p.query_length}_n${p.n_samples}_throughput.csv"))
-
     script:
     """
     bench_pgen.py \\
@@ -496,6 +483,9 @@ process BENCH_PGEN_THROUGHPUT {
       --mode throughput \\
       --n-samples ${p.n_samples}
     """
+
+    output:
+    record(method: "pgen", csv: file("pgen_q${p.query_length}_n${p.n_samples}_throughput.csv"))
 }
 
 process BENCH_PGEN_MEMORY {
@@ -508,9 +498,6 @@ process BENCH_PGEN_MEMORY {
     input:
     p: SweepInput
 
-    output:
-    record(method: "pgen", csv: file("pgen_q${p.query_length}_n${p.n_samples}_memory.csv"))
-
     script:
     """
     bench_pgen.py \\
@@ -521,6 +508,9 @@ process BENCH_PGEN_MEMORY {
       --mode memory \\
       --n-samples ${p.n_samples}
     """
+
+    output:
+    record(method: "pgen", csv: file("pgen_q${p.query_length}_n${p.n_samples}_memory.csv"))
 }
 
 process BENCH_PRESUBSET_BCF_THROUGHPUT {
@@ -533,9 +523,6 @@ process BENCH_PRESUBSET_BCF_THROUGHPUT {
     input:
     p: SweepInput
 
-    output:
-    record(method: "presubset_bcf", csv: file("presubset_bcf_q${p.query_length}_n${p.n_samples}_throughput.csv"))
-
     script:
     """
     bench_presubset_bcf.py \\
@@ -546,6 +533,9 @@ process BENCH_PRESUBSET_BCF_THROUGHPUT {
       --mode throughput \\
       --n-samples ${p.n_samples}
     """
+
+    output:
+    record(method: "presubset_bcf", csv: file("presubset_bcf_q${p.query_length}_n${p.n_samples}_throughput.csv"))
 }
 
 process BENCH_PRESUBSET_BCF_MEMORY {
@@ -558,9 +548,6 @@ process BENCH_PRESUBSET_BCF_MEMORY {
     input:
     p: SweepInput
 
-    output:
-    record(method: "presubset_bcf", csv: file("presubset_bcf_q${p.query_length}_n${p.n_samples}_memory.csv"))
-
     script:
     """
     bench_presubset_bcf.py \\
@@ -571,6 +558,9 @@ process BENCH_PRESUBSET_BCF_MEMORY {
       --mode memory \\
       --n-samples ${p.n_samples}
     """
+
+    output:
+    record(method: "presubset_bcf", csv: file("presubset_bcf_q${p.query_length}_n${p.n_samples}_memory.csv"))
 }
 
 process COMBINE_THROUGHPUT {
