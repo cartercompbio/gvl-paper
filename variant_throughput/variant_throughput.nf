@@ -287,9 +287,9 @@ process SUBSET_PGEN {
 process BUILD_SVAR_FROM_PGEN {
     queue 'carter-compute'
     clusterOptions '--nodelist=carter-cn-04'
-    cpus 8
+    cpus 4
     time 8.h
-    memory 64.GB
+    memory 128.GB
 
     input:
     n: Integer
@@ -308,7 +308,7 @@ from genoray import SparseVar, PGEN
 SparseVar.from_pgen(
     Path("N${n}.svar"),
     PGEN(Path("${pgen}")),
-    max_mem="48G",
+    max_mem="96G",
     n_jobs=${task.cpus},
 )
 PY
