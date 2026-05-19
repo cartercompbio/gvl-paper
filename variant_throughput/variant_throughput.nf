@@ -24,6 +24,12 @@ workflow {
 
     main:
     n_full = COUNT_FULL_SAMPLES(params.svar)
+
+    bcf_csi_path = file("${params.bcf}.csi")
+    pgen_stem = params.pgen.toString().replaceAll(/\.pgen$/, '')
+    pvar_path = file("${pgen_stem}.pvar")
+    psam_path = file("${pgen_stem}.psam")
+
     lengths = channel.fromList(params.query_lengths)
     pairs_raw = GENERATE_PAIRS(
         lengths,
@@ -33,7 +39,6 @@ workflow {
         params.max_total_length,
         n_full,
     )
-    bcf_csi_path = file("${params.bcf}.csi")
     pairs = pairs_raw.map { r ->
         record(
             query_length: r.query_length,
@@ -43,16 +48,14 @@ workflow {
             bcf: params.bcf,
             bcf_csi: bcf_csi_path,
             pgen: params.pgen,
+            pvar: pvar_path,
+            psam: psam_path,
         ) as SweepInput
     }
 
     n_channel = channel.fromList(params.sample_sizes)
 
     sample_lists = MAKE_SAMPLE_LIST(n_channel, params.sample_seed, params.svar)
-
-    pgen_stem = params.pgen.toString().replaceAll(/\.pgen$/, '')
-    pvar_path = file("${pgen_stem}.pvar")
-    psam_path = file("${pgen_stem}.psam")
 
     subset_bcf_out  = SUBSET_BCF (sample_lists.map { r -> r.n }, sample_lists.map { r -> r.samples }, params.bcf)
     subset_pgen_out = SUBSET_PGEN(
@@ -72,9 +75,17 @@ workflow {
     triples = svar_out
         .map { r -> tuple(r.n, r.svar) }
         .join(subset_bcf_out.map { r -> tuple(r.n, r.bcf, r.csi) }, by: 0)
-        .join(subset_pgen_out.map { r -> tuple(r.n, r.pgen) }, by: 0)
-        .map { n, svar, bcf, csi, pgen ->
-            record(n: n, svar: svar, bcf: bcf, bcf_csi: csi, pgen: pgen) as SubsetTriple
+        .join(subset_pgen_out.map { r -> tuple(r.n, r.pgen, r.pvar, r.psam) }, by: 0)
+        .map { n, svar, bcf, csi, pgen, pvar, psam ->
+            record(
+                n: n,
+                svar: svar,
+                bcf: bcf,
+                bcf_csi: csi,
+                pgen: pgen,
+                pvar: pvar,
+                psam: psam,
+            ) as SubsetTriple
         }
 
     n_pairs = GENERATE_PAIRS_N(
@@ -340,6 +351,8 @@ process GENERATE_PAIRS_N {
         bcf: t.bcf,
         bcf_csi: t.bcf_csi,
         pgen: t.pgen,
+        pvar: t.pvar,
+        psam: t.psam,
     )
 
     script:
@@ -664,6 +677,8 @@ record SubsetTriple {
     bcf: Path
     bcf_csi: Path
     pgen: Path
+    pvar: Path
+    psam: Path
 }
 
 record SweepInput {
@@ -674,6 +689,8 @@ record SweepInput {
     bcf: Path
     bcf_csi: Path
     pgen: Path
+    pvar: Path
+    psam: Path
 }
 
 record MethodResult {
