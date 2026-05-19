@@ -12,6 +12,7 @@ throughput/beds/
 sbox.py
 sbox.ipynb
 .nextflow*
+work/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
