@@ -304,8 +304,13 @@ process BUILD_SVAR_FROM_PGEN {
     """
     python - <<'PY'
 from pathlib import Path
-from genoray import SparseVar
-SparseVar.from_pgen(Path("${pgen}"), Path("N${n}.svar"))
+from genoray import SparseVar, PGEN
+SparseVar.from_pgen(
+    Path("N${n}.svar"),
+    PGEN(Path("${pgen}")),
+    max_mem="48G",
+    n_jobs=${task.cpus},
+)
 PY
     """
 }
