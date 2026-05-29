@@ -52,6 +52,7 @@ genvarloader = "==0.6.1"
 torch = { version = "*", index = "https://download.pytorch.org/whl/cpu" }
 typer = "*"
 filelock = "*"
+psutil = "*"
 numpy = "<2"
 polars = ">=1"
 
