@@ -9,11 +9,18 @@ version = "0.2.0"
 [environments]
 default = ["bench"]
 basenji2 = ["basenji2"]
+# Pinned to genvarloader 0.6.1 — the version the manuscript throughput benchmarks
+# (results/{hap,track}_results.csv) were collected on. Later GVL releases regressed
+# haplotype/track dataloading ~10-30x in throughput and several-fold in peak RAM
+# (see GenVarLoader/REGRESSIONS.md). Do NOT regenerate those CSVs on a newer GVL
+# without re-validating. Old 0.6.1-API scripts live in hap_track_throughput/bin_gvl061/.
+bench061 = ["bench061"]
 
 [feature.bench.dependencies]
 python = "3.12.*"
 ipykernel = "*"
 ipywidgets = "*"
+bcftools = ">=1.21"
 
 [feature.bench.pypi-dependencies]
 torch = { version = "==2.10.0", index = "https://download.pytorch.org/whl/cu126" }
@@ -24,12 +31,11 @@ polars = ">=1.37.1,<2"
 typing-extensions = ">=4.14,<5"
 einops = ">=0.8.0,<0.9"
 jupyterlab = ">=4.3.3,<5"
-genvarloader = { version = ">=0.21.1,<0.22", extras = ["cli"] }
-genoray = ">=2.2.1,<3"
+genvarloader = { version = ">=0.24.1,<0.25", extras = ["cli"] }
 bpnet-lite = ">=0.8.1,<0.9"
 seqmodels = "==0.0.3"
 cyclopts = ">=4.5.1, <5"
-psutil = ">=6.0.0,<7"
+psutil = "*"
 seaborn = "*"
 rich = "*"
 matplotlib = "*"
@@ -37,6 +43,17 @@ statsmodels = ">=0.14.6, <0.15"
 
 [feature.bench.tasks]
 i-kernel = "ipython kernel install --user --name gvl-paper-bench"
+
+[feature.bench061.dependencies]
+python = "3.12.*"
+
+[feature.bench061.pypi-dependencies]
+genvarloader = "==0.6.1"
+torch = { version = "*", index = "https://download.pytorch.org/whl/cpu" }
+typer = "*"
+filelock = "*"
+numpy = "<2"
+polars = ">=1"
 
 [feature.basenji2.dependencies]
 python = "3.12.*"
