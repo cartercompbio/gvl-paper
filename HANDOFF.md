@@ -17,37 +17,46 @@ maintenance; this is the resume point._
 4. **Blocked:** haps memory crashes at large batch; 1KGP haps is extremely slow.
    **Most-likely root cause (NOT yet fixed): numba version mismatch** — see next section.
 
-## ⭐ The key lead to try first on resume
+## ⭐ Haps crash — investigated; here's what we know
 
-`bench061` pinned `genvarloader==0.6.1` but let **numba float to 0.65.1** (current).
-GVL 0.6.1 shipped **2024-11-25**, when numba was ~**0.60**. A too-new numba miscompiles
-0.6.1's numba kernel `reconstruct_haplotypes_from_sparse`, giving:
+Two hypotheses were tested:
 
-```
-SystemError: CPUDispatcher(<function reconstruct_haplotypes_from_sparse ...>)
-returned a result with an exception set
-```
+1. **Numba version (TESTED — pinned, did NOT fix):** `bench061` was floating numba to
+   0.65.1; gvl 0.6.1 shipped 2024-11-25 (numba ~0.60). Pinned `numba==0.60.*`
+   (llvmlite 0.43.0) — committed in `pixi.toml`. This did **not** fix the crash, but it
+   **unmasked the real error** (0.65.1 reported a bare `SystemError`):
+   ```
+   ValueError: cannot assign slice from input of different size
+     in genvarloader/_dataset/__init__.py:989 reconstruct_haplotypes_from_sparse(...)
+   ```
+2. **Genuine 0.6.1 reconstruction bug at large batch (this is the real cause):** at
+   seqlen 16384, **batch 8192 works, batch 16384 crashes** — boundary around
+   `n_queries × region_length ≈ 2²⁸`. Tracks never call this kernel, so tracks are fine.
 
-Tracks don't use that kernel → tracks work. Haps do → haps crash. This explains the user's
-question "how did the original benchmarks run if they error now?": the original ran on
-2024-era numba; ours runs on numba 0.65.1.
+**Why did the original benchmarks run, then?** Still partly open. The original *throughput*
+runs (`hap_results.csv`) were 1KGP haps and reached huge batches — so either (a) the bug is
+data-dependent (a specific region/sample in the batch triggers the slice-size mismatch, and
+the original dataset/region sampling didn't include it), or (b) something about our dataset
+build differs. **Worth a focused look on resume** (compare against an original-era dataset,
+or bisect which region triggers it). NOTE: batch 8192 is already an absurd training batch —
+the crash is only in the unrealistic tail of the sweep.
 
-**ACTION:** pin numba (+ llvmlite) to the 0.6.1 era in `feature.bench061` and re-test haps:
+**RECOMMENDED resume path (pragmatic):** cap the haps memory grid to the stable range and
+get clean haps curves; treat the tail as a separate (likely upstream) bug.
 
-```toml
-# pixi.toml, [feature.bench061.pypi-dependencies]
-numba = "==0.60.0"      # try 0.60.x first (Nov-2024 era); 0.61 if 0.60 won't solve
-# llvmlite is pulled by numba; let it resolve, or pin ==0.43.* to match 0.60
-```
 ```bash
-pixi install -e bench061
-# quick single-cell test of the batch size that crashed (threads=1 on login is fine):
-printf "threads,batch_size,n_batches\n1,16384,5\n" > /tmp/tg.csv
+# regenerate a capped haps grid per seqlen (stable: batch <= 8192) and run haps sweeps.
+# Easiest: edit make_launch_grid invocation in mem_driver.sh to add a smaller --max-npb
+# for the haps pass (e.g. 2**27), OR post-filter the grid CSV to batch_size <= 8192.
+# Then: rm results_gvl061/haps_memory/*.csv ; resubmit the array (below).
+```
+Quick single-cell sanity check (threads=1 on login is fine; batch 8192 OK, 16384 crashes):
+```bash
+printf "threads,batch_size,n_batches\n1,8192,5\n" > /tmp/tg.csv
 NUMBA_NUM_THREADS=1 pixi run -e bench061 python hap_track_throughput/bin_gvl061/benchmark_mem.py \
   /tmp/h.csv data/datasets_gvl061/tcga/seqlen_16384.gvl data/ref/tcga/ref.fa /tmp/tg.csv --mode haps --dataset TCGA_ATAC
 ```
-If that completes without the SystemError, the fix is confirmed → resubmit the array (below).
-(Current bench061 versions for reference: numba 0.65.1, numpy 1.26.4, llvmlite 0.47.0.)
+(bench061 now: numba 0.60.0, numpy 1.26.4, llvmlite 0.43.0.)
 
 ## How to resume the memory benchmark
 

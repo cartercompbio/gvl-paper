@@ -38,8 +38,13 @@ echo "### node=$(hostname) dataset=$DATASET seqlen=$L cpus=$(python3 -c 'import 
 # 1) BED (genome tiling, ~100 tiles/chrom) -- default env (cyclopts/pyranges1)
 pixi run python "$GRID_BIN/make_bed.py" "$L" "$FASTA" "$BED" --canonical --n-samples 100
 
-# 2) memory grid (threads=64, batch sweep to npb=2**33) -- default env
+# 2) memory grids (threads=64, batch sweep) -- default env
+#    tracks: full sweep to npb=2**33 (tracks don't hit the haps reconstruction bug)
+#    haps:   capped at npb=2**27 -- gvl 0.6.1's reconstruct_haplotypes_from_sparse crashes
+#            at npb >= 2**28 ("cannot assign slice from input of different size"). See HANDOFF.md.
+GRID_HAPS=$WORK/grid_${L}_haps.csv
 pixi run python "$GRID_BIN/make_launch_grid.py" "$L" --max-npb $((2**33)) --memory-grid --output "$GRID"
+pixi run python "$GRID_BIN/make_launch_grid.py" "$L" --max-npb $((2**27)) --memory-grid --output "$GRID_HAPS"
 
 # 3) build dataset on gvl 0.6.1 (skip if already built)
 if [ -f "$GVL/metadata.json" ]; then
@@ -54,16 +59,16 @@ fi
 
 # 4) memory sweeps on gvl 0.6.1 (skip a sweep if its CSV already exists -> idempotent)
 TBBDIR=$ROOT/.pixi/envs/bench061/lib   # ensure numba tbb layer (0.6.1's native)
-run_sweep () {  # $1=mode  $2=outdir
-  local mode="$1" out="results_gvl061/$2/${DSNAME}_${L}.csv"
+run_sweep () {  # $1=mode  $2=outdir  $3=gridfile
+  local mode="$1" out="results_gvl061/$2/${DSNAME}_${L}.csv" gf="$3"
   if [ -s "$out" ]; then echo "### skip $mode (exists): $out"; return 0; fi
   NUMBA_NUM_THREADS=64 LD_LIBRARY_PATH="$TBBDIR:${LD_LIBRARY_PATH:-}" \
     pixi run -e bench061 python "$BIN/benchmark_mem.py" \
-      "$out" "$GVL" "$FASTA" "$GRID" --mode "$mode" --dataset "$DSNAME" --backend gvl061
+      "$out" "$GVL" "$FASTA" "$gf" --mode "$mode" --dataset "$DSNAME" --backend gvl061
 }
 if [ "$DATASET" = "tcga" ]; then
-  run_sweep tracks tracks_memory
+  run_sweep tracks tracks_memory "$GRID"
 fi
-run_sweep haps haps_memory
+run_sweep haps haps_memory "$GRID_HAPS"
 
 echo "### DONE dataset=$DATASET seqlen=$L"

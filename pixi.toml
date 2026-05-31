@@ -53,6 +53,10 @@ torch = { version = "*", index = "https://download.pytorch.org/whl/cpu" }
 typer = "*"
 filelock = "*"
 psutil = "*"
+# numba pinned to the gvl-0.6.1 era (released 2024-11-25). Newer numba (was floating to
+# 0.65.1) miscompiles 0.6.1's reconstruct_haplotypes_from_sparse kernel -> SystemError
+# during haplotype reconstruction. See HANDOFF.md.
+numba = "==0.60.*"
 numpy = "<2"
 polars = ">=1"
 
