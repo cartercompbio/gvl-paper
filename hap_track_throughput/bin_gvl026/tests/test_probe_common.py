@@ -45,12 +45,22 @@ def test_n_bytes_numpy_and_object_with_numel():
     farr = np.zeros((4, 2048), dtype=np.float32)
     assert n_bytes(farr) == 4 * 2048 * 4
 
+    # Mirror a real torch.Tensor: it has numel()/element_size() AND a .size
+    # *method* plus an .itemsize attribute. The numpy-first dispatch would have
+    # misrouted this (calling int(<bound method>) -> TypeError / wrong branch),
+    # so this asserts the torch path is taken.
     class FakeTensor:
+        itemsize = 4
+
         def numel(self):
             return 8
+
         def element_size(self):
             return 4
-    assert n_bytes(FakeTensor()) == 32
+
+        def size(self):
+            return (2, 4)
+    assert n_bytes(FakeTensor()) == 8 * 4
 
 
 def test_mib_per_s():

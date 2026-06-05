@@ -14,20 +14,7 @@ from pathlib import Path
 
 import cyclopts
 
-from _probe_common import mib_per_s
-
-
-def _batch_bytes(batch) -> int:
-    """Total bytes in a batch.
-
-    Prefer the torch interface (numel/element_size): a real torch.Tensor also
-    exposes ``.size`` (a *method*, not numpy's int property) and ``.itemsize``,
-    so the numpy-first check in _probe_common.n_bytes misroutes tensors. tracks
-    mode yields a torch.Tensor; haps mode yields a numpy ndarray.
-    """
-    if hasattr(batch, "numel") and hasattr(batch, "element_size"):  # torch.Tensor
-        return int(batch.numel()) * int(batch.element_size())
-    return int(batch.size) * int(batch.itemsize)  # numpy ndarray
+from _probe_common import mib_per_s, n_bytes
 
 
 def bench(
@@ -102,7 +89,7 @@ def bench(
                         if n_yielded == burn_in:
                             t0 = perf_counter()
                         if n_yielded >= burn_in:
-                            total_bytes += _batch_bytes(batch)
+                            total_bytes += n_bytes(batch)
                         n_yielded += 1
                         if n_yielded >= n_batches + burn_in:
                             done = True

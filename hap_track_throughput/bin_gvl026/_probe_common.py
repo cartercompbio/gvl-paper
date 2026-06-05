@@ -33,9 +33,9 @@ def n_batches_for(npb: int) -> int:
 
 def n_bytes(batch) -> int:
     """Total bytes in a batch, supporting numpy arrays and torch-like tensors."""
-    if hasattr(batch, "itemsize") and hasattr(batch, "size"):  # numpy ndarray
-        return int(batch.size) * int(batch.itemsize)
-    return int(batch.numel()) * int(batch.element_size())  # torch.Tensor
+    if hasattr(batch, "numel"):  # torch.Tensor (numpy ndarrays have no .numel)
+        return int(batch.numel()) * int(batch.element_size())
+    return int(batch.size) * int(batch.itemsize)  # numpy ndarray
 
 
 def mib_per_s(total_bytes: int, seconds: float) -> float:
