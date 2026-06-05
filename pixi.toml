@@ -15,6 +15,11 @@ basenji2 = ["basenji2"]
 # (see GenVarLoader/REGRESSIONS.md). Do NOT regenerate those CSVs on a newer GVL
 # without re-validating. Old 0.6.1-API scripts live in hap_track_throughput/bin_gvl061/.
 bench061 = ["bench061"]
+# Pinned to genvarloader 0.26.0 — the release that directly targets the GVL >=0.21
+# throughput/OOM regressions (see GenVarLoader/docs/superpowers/REGRESSIONS.md). Used ONLY by the
+# parity probe in hap_track_throughput/bin_gvl026/ to compare against the 0.6.1 baseline
+# (results/{hap,track}_results.csv). CPU torch — the benchmark has no GPU workload.
+bench026 = ["bench026"]
 
 [feature.bench.dependencies]
 python = "3.12.*"
@@ -59,6 +64,17 @@ psutil = "*"
 numba = "==0.60.*"
 numpy = "<2"
 polars = ">=1"
+
+[feature.bench026.dependencies]
+python = "3.12.*"
+
+[feature.bench026.pypi-dependencies]
+genvarloader = "==0.26.0"
+torch = { version = "*", index = "https://download.pytorch.org/whl/cpu" }
+cyclopts = ">=4.5.1, <5"
+polars = ">=1"
+psutil = "*"
+pytest = "*"
 
 [feature.basenji2.dependencies]
 python = "3.12.*"
