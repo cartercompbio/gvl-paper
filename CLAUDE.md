@@ -64,3 +64,8 @@ GVL's API and performance both shifted across releases, so the env is split thre
 - `feature.basenji2` → `genvarloader ==0.20.0`: don't bump it — the cached `preds_hg19.npy` and `basenji2-eval-hg19.ipynb` target the 0.20 API.
 - `feature.bench061` → `genvarloader ==0.6.1`: the version the manuscript throughput results were measured on. **GVL ≥0.21 regressed dataloading throughput ~10–30× and peak RAM several-fold** (root cause not yet found upstream; documented in `../GenVarLoader/REGRESSIONS.md`). Regenerate `results/{hap,track}_results.csv` only in this env, using `hap_track_throughput/bin_gvl061/`.
 - `feature.bench` (default) → `genvarloader >=0.24.1`: current/general work and plotting. **Not** for regenerating the paper throughput numbers (it would silently ship the regressed values).
+- `feature.bench026` → `genvarloader ==0.26.0`: the release targeting the >=0.21 throughput/OOM
+  regressions. Used **only** by the parity probe in `hap_track_throughput/bin_gvl026/`, which
+  compares 0.26.0 (default + single-`buffered` dataloading) against the 0.6.1 baseline
+  (`results/{hap,track}_results.csv`); probe outputs land in `results_gvl026/`. CPU torch (no GPU
+  workload). Do **not** repoint the manuscript baseline CSVs to this env.
