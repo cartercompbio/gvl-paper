@@ -105,3 +105,24 @@ def test_measure_cell_reiterates_until_n_batches():
     assert res is not None
     assert res.n_measured == 4
     assert res.total_bytes == 40
+
+
+def test_measure_cell_time_limit_early_stop():
+    # With 100 batches available, time_limit_ns=1 and min_batches=2, the loop
+    # must stop at min_batches (2) rather than running all 50 n_batches.
+    #
+    # Trace (burn_in=0, _clock advances 1 ns per call):
+    #   t_start = clock() → 1
+    #   batch 0 (n_yielded=0): n_yielded==burn_in → t_start=clock()=2; n_measured=1;
+    #     elapsed = clock()-t_start = 3-2 = 1; n_measured(1)<min_batches(2) → no stop
+    #   batch 1 (n_yielded=1): n_measured=2; elapsed = clock()-t_start = 4-2 = 2;
+    #     n_measured(2)>=min_batches(2) AND elapsed(2)>=time_limit_ns(1) → done=True, break
+    # Result: n_measured == 2, well before n_batches=50.
+    dl = [_FakeBatch(10)] * 100
+    res = measure_cell(
+        dl, burn_in=0, n_batches=50, time_limit_ns=1, min_batches=2,
+        now_ns=_clock(),
+    )
+    assert res is not None
+    assert res.n_measured == 2  # stopped at min_batches, not at n_batches=50
+    assert res.total_bytes == 20
