@@ -64,8 +64,30 @@ GVL's API and performance both shifted across releases, so the env is split thre
 - `feature.basenji2` → `genvarloader ==0.20.0`: don't bump it — the cached `preds_hg19.npy` and `basenji2-eval-hg19.ipynb` target the 0.20 API.
 - `feature.bench061` → `genvarloader ==0.6.1`: the version the manuscript throughput results were measured on. **GVL ≥0.21 regressed dataloading throughput ~10–30× and peak RAM several-fold** (root cause not yet found upstream; documented in `../GenVarLoader/REGRESSIONS.md`). Regenerate `results/{hap,track}_results.csv` only in this env, using `hap_track_throughput/bin_gvl061/`.
 - `feature.bench` (default) → `genvarloader >=0.24.1`: current/general work and plotting. **Not** for regenerating the paper throughput numbers (it would silently ship the regressed values).
-- `feature.bench026` → `genvarloader ==0.26.0`: the release targeting the >=0.21 throughput/OOM
-  regressions. Used **only** by the parity probe in `hap_track_throughput/bin_gvl026/`, which
-  compares 0.26.0 (default + single-`buffered` dataloading) against the 0.6.1 baseline
-  (`results/{hap,track}_results.csv`); probe outputs land in `results_gvl026/`. CPU torch (no GPU
-  workload). Do **not** repoint the manuscript baseline CSVs to this env.
+- `feature.bench027` → `genvarloader ==0.27.0`: the release line targeting the >=0.21 throughput/OOM
+  regressions (bumped from 0.26.0 — see below). Used **only** by the parity probe in
+  `hap_track_throughput/bin_gvl027/`, which compares it (default + single-`buffered` dataloading)
+  against the 0.6.1 baseline (`results/{hap,track}_results.csv`); probe outputs land in
+  `results_gvl027/`. CPU torch (no GPU workload). Do **not** repoint the manuscript baseline CSVs to this env.
+  **Why 0.27.0:** 0.26.0's `buffered` dataloader forced `drop_last=True`, so a cell with
+  `batch_size > n_instances` yielded 0 batches — which sent `benchmark_dl.py`'s `while not done`
+  loop into an infinite re-iteration (hung the tcga-atac probe cells, which have only 6200
+  instances; 1kGP with ~7.7M was unaffected). Fixed in 0.27.0.
+  **Full throughput+memory bench (2026-06-05):** the same `bench027` env now also
+  backs the *full* manuscript grid (not just the reduced probe), run through the
+  production Nextflow harness `hap_track_throughput/benchmark.nf` with
+  `-profile gvl027` (see `hap_track_throughput/nextflow.config`, which activates
+  this env on each SLURM job). All GVL datasets are **SVAR-backed** (`bench_native`
+  off by default); genoray 2.9.0's hap-safe filter (`~is_symbolic & ~is_breakend`,
+  via `bin/_genoray_filter.py`) is applied at SVAR conversion. Each cell is run in
+  two dataloader modes (`none` = default `to_dataloader`, `buffered` =
+  `buffer_bytes=2 GiB`). `bin/benchmark_haps.py` / `benchmark_tracks.py` emit the
+  reconciled schema `dataset,backend,dl_mode,threads,seqlen,batch_size,
+  n_batches_measured,total_bytes,duration_ns,throughput (MiB/s)` (memory pass:
+  `...,avg_rss_bytes,peak_rss_bytes`), directly comparable to the 0.6.1 baseline.
+  Drive the whole thing with `hap_track_throughput/run_full_bench.sbatch`; outputs
+  land in `results_gvl027/{haps,tracks,haps_memory,tracks_memory,...}` and are joined
+  to the baseline by `bin_gvl027/compare_to_baseline.py`. The throughput-vs-0.6.1
+  ratio is an **internal sanity check**; memory is reported as 0.27.0 absolute (no
+  0.6.1 memory baseline exists). Do **not** repoint the manuscript baseline CSVs to
+  this env.
