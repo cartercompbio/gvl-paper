@@ -52,7 +52,7 @@ def _load_dir(results_dir: Path, dirname: str):
     df = pl.concat([pl.read_csv(p) for p in files], how="vertical_relaxed")
     return df.with_columns(
         mode=pl.lit(mode),
-        dataset_norm=pl.col("dataset").map_elements(norm_dataset, return_dtype=pl.Utf8),
+        dataset_norm=pl.col("dataset").str.to_lowercase().str.replace_all("_", "-", literal=True),
     )
 
 
@@ -95,7 +95,7 @@ def main(
             pl.concat([hap, trk], how="vertical_relaxed")
             .rename({"throughput (MiB/s)": "v061"})
             .with_columns(
-                dataset_norm=pl.col("dataset").map_elements(norm_dataset, return_dtype=pl.Utf8)
+                dataset_norm=pl.col("dataset").str.to_lowercase().str.replace_all("_", "-", literal=True)
             )
             .group_by(["dataset_norm", "mode", "threads", "seqlen", "batch_size"])
             .agg(pl.col("v061").median())
@@ -164,17 +164,20 @@ def main(
         mem.sort(["dataset_norm", "mode", "dl_mode", "seqlen", "batch_size"]).write_csv(mem_out)
         print(f"WROTE {mem_out} ({mem.height} rows)")
 
-        mpdf = mem.with_columns(peak_gib=pl.col("peak_rss_bytes") / 2**30).to_pandas()
-        g = sns.relplot(
-            data=mpdf, x="batch_size", y="peak_gib", hue="dataset_norm", style="dl_mode",
-            col="seqlen", col_wrap=2, kind="line", marker="o",
-            facet_kws={"sharex": False, "sharey": False},
-        )
-        for ax in g.axes.flat:
-            ax.set_xscale("log", base=2)
-        g.set_axis_labels("batch_size", "peak RSS (GiB)")
-        g.savefig(fig_dir / "gvl027_peak_rss.png", dpi=150, bbox_inches="tight")
-        print(f"WROTE {fig_dir / 'gvl027_peak_rss.png'}")
+        if mem.height:
+            mpdf = mem.with_columns(peak_gib=pl.col("peak_rss_bytes") / 2**30).to_pandas()
+            g = sns.relplot(
+                data=mpdf, x="batch_size", y="peak_gib", hue="dataset_norm", style="dl_mode",
+                col="seqlen", col_wrap=2, kind="line", marker="o",
+                facet_kws={"sharex": False, "sharey": False},
+            )
+            for ax in g.axes.flat:
+                ax.set_xscale("log", base=2)
+            g.set_axis_labels("batch_size", "peak RSS (GiB)")
+            g.savefig(fig_dir / "gvl027_peak_rss.png", dpi=150, bbox_inches="tight")
+            print(f"WROTE {fig_dir / 'gvl027_peak_rss.png'}")
+        else:
+            print("No valid memory rows after drop_nulls — skipping memory plot.")
     else:
         print("No memory CSVs found under haps_memory/ or tracks_memory/ — skipping memory report.")
 
