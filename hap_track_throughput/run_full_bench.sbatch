@@ -33,7 +33,9 @@ done
 
 echo "=== COMPARE  $(date) ==="
 cd "$ROOT"
-pixi run -e bench027 python hap_track_throughput/bin_gvl027/compare_to_baseline.py \
+# compare runs in the default env (it needs matplotlib/seaborn, which bench027
+# lacks; it only reads CSVs + plots, no GVL import).
+pixi run -e default python hap_track_throughput/bin_gvl027/compare_to_baseline.py \
   || echo "WARN: compare failed — rerun manually; result CSVs are intact"
 
 echo "=== DONE  $(date) ==="

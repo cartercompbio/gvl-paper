@@ -80,8 +80,11 @@ GVL's API and performance both shifted across releases, so the env is split thre
   this env on each SLURM job). All GVL datasets are **SVAR-backed** (`bench_native`
   off by default); genoray 2.9.0's hap-safe filter (`~is_symbolic & ~is_breakend`,
   via `bin/_genoray_filter.py`) is applied at SVAR conversion. Each cell is run in
-  two dataloader modes (`none` = default `to_dataloader`, `buffered` =
-  `buffer_bytes=2 GiB`). `bin/benchmark_haps.py` / `benchmark_tracks.py` emit the
+  the `buffered` dataloader only (`buffer_bytes=2 GiB`); the default
+  `to_dataloader` (mode=none) is no longer benchmarked. (Buffered throughput is
+  amortized over the buffer — per-minibatch torch-collate/dispatch overhead
+  dominates at tiny batch sizes — so the grid sweeps batch_size.)
+  `bin/benchmark_haps.py` / `benchmark_tracks.py` emit the
   reconciled schema `dataset,backend,dl_mode,threads,seqlen,batch_size,
   n_batches_measured,total_bytes,duration_ns,throughput (MiB/s)` (memory pass:
   `...,avg_rss_bytes,peak_rss_bytes`), directly comparable to the 0.6.1 baseline.

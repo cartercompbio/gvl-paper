@@ -37,7 +37,11 @@ workflow {
     }
 
     lengths = channel.fromList([2048, 16384, 131072, 1048576])
-    dl_modes = channel.fromList(["none", "buffered"])
+    // Buffered-only: the default `to_dataloader` (mode=none) is not benchmarked.
+    // Buffered is what the manuscript reports; its throughput is amortized over
+    // the buffer (per-minibatch torch-collate overhead dominates at tiny batch
+    // sizes, so the grid sweeps batch_size). See compare_to_baseline.py.
+    dl_modes = channel.fromList(["buffered"])
 
     // SVAR conversion bench (runs once, not per seqlen). Hap-safe filtering
     // (drop symbolic + breakend ALTs) is applied here so every SVAR is

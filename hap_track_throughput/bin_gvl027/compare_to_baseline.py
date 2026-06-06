@@ -1,19 +1,24 @@
 #! /usr/bin/env python
 """Compare the GVL 0.27.0 full-bench results to the v0.6.1 baseline.
 
+Run in the **default** pixi env (`pixi run -e default ...`): this reads CSVs and
+plots with matplotlib/seaborn (absent from bench027) and never imports GVL.
+
 Reads the Nextflow output layout under results_gvl027/:
     haps/{dataset}_{length}_{backend}_{dl_mode}.csv          (throughput)
     tracks/{dataset}_{length}_{backend}_{dl_mode}.csv        (throughput)
     haps_memory/...   tracks_memory/...                      (peak/avg RSS)
 
+Only the buffered dataloader is benchmarked (mode=none was dropped).
+
 Outputs:
-  results_gvl027/parity_summary.csv  — throughput, dl_mode=="none" joined to the
-       0.6.1 baseline on (dataset,mode,threads,seqlen,batch_size); ratio = v027/v061.
-       INTERNAL sanity check, not a paper deliverable.
-  results_gvl027/buffered_throughput.csv — buffered throughput, standalone (no baseline).
+  results_gvl027/parity_summary.csv  — buffered throughput joined to the 0.6.1
+       baseline on (dataset,mode,threads,seqlen,batch_size); ratio = v027/v061.
+       INTERNAL sanity check, not a paper deliverable. NB buffered throughput is
+       batch-size-amortized, so the ratio is most meaningful at larger batch sizes.
   results_gvl027/memory_summary.csv  — per (dataset,mode,dl_mode,seqlen,batch_size)
        peak/avg RSS, absolute (no baseline join).
-  figures/gvl027_parity.png          — v061-vs-v027 throughput scatter (none mode).
+  figures/gvl027_parity.png          — v061-vs-v027 buffered-throughput scatter.
   figures/gvl027_peak_rss.png        — peak RSS vs batch_size, faceted by seqlen.
 """
 
@@ -101,9 +106,12 @@ def main(
             .agg(pl.col("v061").median())
         )
 
-        # internal parity: dl_mode == none vs baseline
-        none = tput.filter(pl.col("dl_mode") == "none")
-        joined = none.join(
+        # internal parity: buffered (the only benchmarked dl_mode) vs baseline.
+        # NB buffered throughput is batch-size-amortized, so the ratio is most
+        # meaningful at the larger batch sizes; small-batch cells carry torch
+        # per-minibatch overhead absent from the 0.6.1 default loader.
+        buffered = tput.filter(pl.col("dl_mode") == "buffered")
+        joined = buffered.join(
             base, on=["dataset_norm", "mode", "threads", "seqlen", "batch_size"], how="left"
         ).with_columns(ratio=(pl.col("v027") / pl.col("v061")))
         summary = results_dir / "parity_summary.csv"
@@ -131,12 +139,6 @@ def main(
             g.set_axis_labels("v0.6.1 MiB/s", "v0.27.0 MiB/s")
             g.savefig(fig_dir / "gvl027_parity.png", dpi=150, bbox_inches="tight")
             print(f"WROTE {fig_dir / 'gvl027_parity.png'}")
-
-        # buffered standalone
-        buffered = tput.filter(pl.col("dl_mode") == "buffered")
-        buf_out = results_dir / "buffered_throughput.csv"
-        buffered.sort(["dataset_norm", "mode", "seqlen", "batch_size", "threads"]).write_csv(buf_out)
-        print(f"WROTE {buf_out} ({buffered.height} rows)")
     else:
         print("No throughput CSVs found under haps/ or tracks/ — skipping throughput report.")
 
