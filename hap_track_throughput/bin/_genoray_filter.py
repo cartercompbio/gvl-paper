@@ -15,7 +15,7 @@ form (kept in sync by the unit tests in tests/test_genoray_filter.py).
 from __future__ import annotations
 
 import re
-from typing import Callable, Iterable, Optional
+from typing import Callable, Iterable
 
 # Mirror of genoray.exprs._BND_PATTERN (VCF 4.x breakend ALT replacement string).
 # Matches mate-pair forms (contain `[` or `]`) and single-breakend forms
@@ -76,8 +76,8 @@ def open_filtered_reader(variants, no_symbolic: bool = True, no_breakend: bool =
     pl_filter = hap_safe_pl_filter(no_symbolic, no_breakend)
     if name.endswith(".pgen"):
         return genoray.PGEN(variants, filter=pl_filter), "pgen"
-    if name.endswith(".bcf") or name.endswith(".vcf") or name.endswith(".vcf.gz"):
+    if name.endswith(".bcf") or name.endswith(".bcf.gz") or name.endswith(".vcf") or name.endswith(".vcf.gz"):
         cb = hap_safe_vcf_callable(no_symbolic, no_breakend)
-        source_fmt = "bcf" if name.endswith(".bcf") else "vcf"
+        source_fmt = "bcf" if (name.endswith(".bcf") or name.endswith(".bcf.gz")) else "vcf"
         return genoray.VCF(variants, filter=cb, pl_filter=pl_filter), source_fmt
     raise ValueError(f"Unsupported variant format: {variants}")
