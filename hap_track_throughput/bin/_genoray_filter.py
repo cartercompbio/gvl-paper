@@ -15,7 +15,7 @@ form (kept in sync by the unit tests in tests/test_genoray_filter.py).
 from __future__ import annotations
 
 import re
-from typing import Callable, Iterable
+from typing import Callable
 
 # Mirror of genoray.exprs._BND_PATTERN (VCF 4.x breakend ALT replacement string).
 # Matches mate-pair forms (contain `[` or `]`) and single-breakend forms
@@ -45,16 +45,20 @@ def hap_safe_pl_filter(no_symbolic: bool = True, no_breakend: bool = True):
 
 def hap_safe_vcf_callable(
     no_symbolic: bool = True, no_breakend: bool = True
-) -> Callable[[Iterable[str]], bool]:
+) -> Callable[[object], bool]:
     """cyvcf2-style callable mirroring `hap_safe_pl_filter`.
 
-    Accepts an iterable of ALT strings (a `cyvcf2.Variant.ALT`) and returns True
-    to KEEP the record. Pass directly as `VCF(filter=...)` alongside
-    `pl_filter=hap_safe_pl_filter(...)`.
+    genoray invokes the VCF/BCF filter as `filter(callable, vcf)`, so the
+    callable receives a whole `cyvcf2.Variant` (its `_filter` type is
+    `Callable[[cyvcf2.Variant], bool]`), NOT just its ALT list. We therefore
+    pull `.ALT` off the variant; a bare iterable of ALT strings is also accepted
+    (for testing). Returns True to KEEP the record. Pass directly as
+    `VCF(filter=...)` alongside `pl_filter=hap_safe_pl_filter(...)`.
     """
 
-    def keep(alts: Iterable[str]) -> bool:
-        alts = list(alts)
+    def keep(variant: object) -> bool:
+        # cyvcf2.Variant -> .ALT (list of ALT allele strings); else an iterable.
+        alts = list(getattr(variant, "ALT", variant))  # type: ignore[arg-type]
         if no_symbolic and any(a.startswith("<") for a in alts):
             return False
         if no_breakend and any(re.search(_BND_PATTERN, a) is not None for a in alts):
