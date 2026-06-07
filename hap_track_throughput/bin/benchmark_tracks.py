@@ -20,7 +20,8 @@ def bench(
     dataset: str = "",
     backend: str = "svar",
     dl_mode: str = "none",  # "none" or "buffered"
-    buffer_bytes: int = 2 * 2**30,
+    buffer_bytes: int = 2 * 2**30,  # floor buffer for small cells
+    max_buffer_bytes: int = 64 * 2**30,  # per-cell buffer cap; over-cap cells -> NaN
     burn_in: int = 1,
     replicates: int = 3,
     measure_memory: bool = False,
@@ -41,6 +42,7 @@ def bench(
         THROUGHPUT_HEADER,
         measure_cell,
         mib_per_s,
+        n_bytes,
     )
 
     if dl_mode not in ("none", "buffered"):
@@ -59,7 +61,33 @@ def bench(
     assert int(grid["threads"].max()) <= max_threads  # type: ignore
 
     time_limit_ns = int(time_limit_s * 1e9)
-    dl_kwargs = {} if dl_mode == "none" else {"mode": "buffered", "buffer_bytes": buffer_bytes}
+
+    # Per-cell buffer sizing. The buffered loader is double-buffered, so a
+    # mini-batch fits only when batch_bytes <= buffer_bytes / N_SLOTS (see
+    # genvarloader/_torch.py: slot_bytes = buffer_bytes // n_slots). We probe the
+    # per-instance byte cost once (fixed-length output -> constant per instance)
+    # and size each cell's buffer to max(floor, N_SLOTS * batch_bytes * HEADROOM),
+    # capped at max_buffer_bytes. Over-cap cells are recorded as NaN, not run.
+    # Tracks are multi-track float32, so bytes_per_instance is several x haps.
+    N_SLOTS = 2
+    HEADROOM = 1.15  # clear the strict `>` plus per-instance offset bytes
+    if dl_mode == "buffered":
+        _probe = ds.to_dataloader(batch_size=1, shuffle=False)
+        bytes_per_instance = n_bytes(next(iter(_probe)))
+        del _probe
+        gc.collect()
+        print(f"bytes_per_instance={bytes_per_instance} (probe bs=1)", flush=True)
+    else:
+        bytes_per_instance = 0
+
+    def cell_dl_kwargs(batch_size: int):
+        """Return to_dataloader kwargs for this cell, or None to skip (over cap)."""
+        if dl_mode == "none":
+            return {}
+        required = int(N_SLOTS * batch_size * bytes_per_instance * HEADROOM)
+        if required > max_buffer_bytes:
+            return None
+        return {"mode": "buffered", "buffer_bytes": max(buffer_bytes, required)}
 
     if measure_memory:
         from _mem_sampler import PeakRssSampler
@@ -69,8 +97,14 @@ def bench(
             f.flush()
             for (n_thread, batch_size, n_batches), _ in product(grid.iter_rows(), range(replicates)):
                 nb.set_num_threads(n_thread)
+                kw = cell_dl_kwargs(batch_size)
+                if kw is None:
+                    print(f"SKIP mem t={n_thread} bs={batch_size}: buffer > cap {max_buffer_bytes}", flush=True)
+                    f.write(f"{dataset},{backend},{dl_mode},{n_thread},{length},{batch_size},nan,nan\n")
+                    f.flush()
+                    continue
                 try:
-                    dl = ds.to_dataloader(batch_size=batch_size, shuffle=False, **dl_kwargs)
+                    dl = ds.to_dataloader(batch_size=batch_size, shuffle=False, **kw)
                 except ValueError as e:
                     print(f"SKIP mem t={n_thread} bs={batch_size} ({dl_mode}): {e}", flush=True)
                     f.write(f"{dataset},{backend},{dl_mode},{n_thread},{length},{batch_size},nan,nan\n")
@@ -95,8 +129,14 @@ def bench(
             f.flush()
             for (n_thread, batch_size, n_batches), _ in product(grid.iter_rows(), range(replicates)):
                 nb.set_num_threads(n_thread)
+                kw = cell_dl_kwargs(batch_size)
+                if kw is None:
+                    print(f"SKIP cell t={n_thread} bs={batch_size}: buffer > cap {max_buffer_bytes}", flush=True)
+                    f.write(f"{dataset},{backend},{dl_mode},{n_thread},{length},{batch_size},0,0,0,nan\n")
+                    f.flush()
+                    continue
                 try:
-                    dl = ds.to_dataloader(batch_size=batch_size, shuffle=False, **dl_kwargs)
+                    dl = ds.to_dataloader(batch_size=batch_size, shuffle=False, **kw)
                 except ValueError as e:
                     print(f"SKIP cell t={n_thread} bs={batch_size} ({dl_mode}): {e}", flush=True)
                     f.write(f"{dataset},{backend},{dl_mode},{n_thread},{length},{batch_size},0,0,0,nan\n")

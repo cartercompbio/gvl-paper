@@ -20,6 +20,11 @@ params {
     no_symbolic: Boolean = true
     no_breakend: Boolean = true
     measure_memory: Boolean = false
+    // Per-cell buffered-loader buffer cap (bytes). The loader is double-buffered,
+    // so a batch needs buffer >= 2*batch_bytes; benchmark_{haps,tracks}.py size the
+    // buffer per cell up to this cap (cells needing more are recorded NaN). 64 GiB
+    // covers the full haps range and tracks through saturation. See compare doc.
+    max_buffer_bytes: Integer = 68719476736
     results_dir: String = "${projectDir}/../results_gvl027"
     // When set (memory pass), BENCH_HAPS/BENCH_TRACKS read a derived
     // best-throughput one-row grid from here instead of make_launch_grid.py.
@@ -191,7 +196,7 @@ process BENCH_WRITE_DATASET {
 process BENCH_HAPS {
     clusterOptions '--nodelist=carter-cn-03'
     cpus params.test_grid ? 8 : 32
-    memory 64.GB * task.attempt
+    memory 96.GB * task.attempt
     maxRetries 3
     errorStrategy task.exitStatus in 137..140 ? 'retry' : 'terminate'
 
@@ -218,6 +223,7 @@ process BENCH_HAPS {
       --dataset ${params.dataset} \\
       --backend ${ds.backend} \\
       --dl-mode ${ds.dl_mode} \\
+      --max-buffer-bytes ${params.max_buffer_bytes} \\
       ${mem_flag}
     """
 
@@ -228,7 +234,7 @@ process BENCH_HAPS {
 process BENCH_TRACKS {
     clusterOptions '--nodelist=carter-cn-03'
     cpus params.test_grid ? 8 : 32
-    memory 64.GB * task.attempt
+    memory 96.GB * task.attempt
     maxRetries 3
     errorStrategy task.exitStatus in 137..140 ? 'retry' : 'terminate'
     maxForks 8
@@ -256,6 +262,7 @@ process BENCH_TRACKS {
       --dataset ${params.dataset} \\
       --backend ${ds.backend} \\
       --dl-mode ${ds.dl_mode} \\
+      --max-buffer-bytes ${params.max_buffer_bytes} \\
       ${mem_flag}
     """
 
