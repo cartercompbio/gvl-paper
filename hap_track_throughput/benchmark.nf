@@ -21,6 +21,9 @@ params {
     no_breakend: Boolean = true
     measure_memory: Boolean = false
     results_dir: String = "${projectDir}/../results_gvl027"
+    // When set (memory pass), BENCH_HAPS/BENCH_TRACKS read a derived
+    // best-throughput one-row grid from here instead of make_launch_grid.py.
+    best_grid_dir: String? = null
 }
 
 workflow {
@@ -186,8 +189,8 @@ process BENCH_WRITE_DATASET {
 }
 
 process BENCH_HAPS {
-    clusterOptions '--nodelist=carter-cn-04'
-    cpus params.test_grid ? 8 : 64
+    clusterOptions '--nodelist=carter-cn-03'
+    cpus params.test_grid ? 8 : 32
     memory 64.GB * task.attempt
     maxRetries 3
     errorStrategy task.exitStatus in 137..140 ? 'retry' : 'terminate'
@@ -198,16 +201,13 @@ process BENCH_HAPS {
     script:
     min_npb_arg = params.min_npb != null ? "--min-npb ${params.min_npb}" : ""
     test_arg = params.test_grid ? "--test" : ""
-    mem_grid_arg = params.measure_memory ? "--memory-grid" : ""
     mem_flag = params.measure_memory ? "--measure-memory" : ""
+    use_best = params.measure_memory && params.best_grid_dir != null
+    make_grid = use_best ?
+        "cp ${params.best_grid_dir}/${params.dataset}_${ds.length}_haps.csv grid_${ds.length}.csv" :
+        "make_launch_grid.py ${ds.length} --max-npb ${params.max_npb} ${min_npb_arg} ${test_arg} --output grid_${ds.length}.csv"
     """
-    make_launch_grid.py \\
-      ${ds.length} \\
-      --max-npb ${params.max_npb} \\
-      ${min_npb_arg} \\
-      ${test_arg} \\
-      ${mem_grid_arg} \\
-      --output grid_${ds.length}.csv
+    ${make_grid}
 
     benchmark_haps.py \\
       results_${ds.length}_${ds.backend}_${ds.dl_mode}.csv \\
@@ -226,8 +226,8 @@ process BENCH_HAPS {
 }
 
 process BENCH_TRACKS {
-    clusterOptions '--nodelist=carter-cn-04'
-    cpus params.test_grid ? 8 : 64
+    clusterOptions '--nodelist=carter-cn-03'
+    cpus params.test_grid ? 8 : 32
     memory 64.GB * task.attempt
     maxRetries 3
     errorStrategy task.exitStatus in 137..140 ? 'retry' : 'terminate'
@@ -239,16 +239,13 @@ process BENCH_TRACKS {
     script:
     min_npb_arg = params.min_npb != null ? "--min-npb ${params.min_npb}" : ""
     test_arg = params.test_grid ? "--test" : ""
-    mem_grid_arg = params.measure_memory ? "--memory-grid" : ""
     mem_flag = params.measure_memory ? "--measure-memory" : ""
+    use_best = params.measure_memory && params.best_grid_dir != null
+    make_grid = use_best ?
+        "cp ${params.best_grid_dir}/${params.dataset}_${ds.length}_tracks.csv grid_${ds.length}.csv" :
+        "make_launch_grid.py ${ds.length} --max-npb ${params.max_npb} ${min_npb_arg} ${test_arg} --output grid_${ds.length}.csv"
     """
-    make_launch_grid.py \\
-      ${ds.length} \\
-      --max-npb ${params.max_npb} \\
-      ${min_npb_arg} \\
-      ${test_arg} \\
-      ${mem_grid_arg} \\
-      --output grid_${ds.length}.csv
+    ${make_grid}
 
     benchmark_tracks.py \\
       results_${ds.length}_${ds.backend}_${ds.dl_mode}.csv \\
