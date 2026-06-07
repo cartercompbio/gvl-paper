@@ -150,10 +150,12 @@ process BENCH_WRITE_DATASET {
     queue 'carter-compute'
     cpus 8
     time 7.d
-    memory {
-        def special_length: Boolean = (wi.length == 1048576 || wi.length == 2048)
-        (params.dataset == 'UKBB') && special_length ? 256.GB : 32.GB
-    }
+    // UKBB has ~487k samples, so writing genotypes is memory-heavy at every
+    // seqlen (32G OOM'd seqlen 131072). Give UKBB a high floor and scale on OOM
+    // retry; writes are unpinned so big-mem jobs land on cn-02/cn-04 (~950 GB).
+    memory { (params.dataset == 'UKBB' ? 256.GB : 32.GB) * task.attempt }
+    maxRetries 2
+    errorStrategy { task.exitStatus in 137..140 ? 'retry' : 'terminate' }
 
     input:
     wi: WriteInput
