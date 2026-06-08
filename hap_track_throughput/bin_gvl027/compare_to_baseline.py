@@ -185,6 +185,31 @@ def main(
             ).select("dataset_norm", "mode", "seqlen", "batch_size", "start_gib", "peak_gib", "duration_s")
         )
 
+        # Single-batch size (GiB) per (mode, seqlen) at the memory operating point,
+        # from the throughput CSVs (total_bytes / n_batches_measured at the largest
+        # batch). Drawn as gray dashed lines so the curve's RSS can be read against
+        # the size of one batch — peak RSS sits far above it (accumulated, mostly
+        # file-backed mmap pages), and above the 96 GiB job request.
+        batch_gib: dict[tuple[str, int], float] = {}
+        for kind in ("haps", "tracks"):
+            td = _load_dir(results_dir, kind)
+            if td is None:
+                continue
+            td = td.with_columns(
+                pl.col("throughput (MiB/s)").cast(pl.Float64, strict=False)
+            ).filter(pl.col("throughput (MiB/s)") > 0)
+            if td.is_empty():
+                continue
+            td = (
+                td.with_columns(bb=pl.col("total_bytes") / pl.col("n_batches_measured"))
+                .sort("batch_size", descending=True)
+                .group_by("mode", "seqlen")
+                .agg(pl.col("bb").first())
+            )
+            for r in td.iter_rows(named=True):
+                batch_gib[(r["mode"], int(r["seqlen"]))] = r["bb"] / 2**30
+        JOB_MEM_GIB = 96.0  # BENCH_HAPS/TRACKS `memory 96.GB` request
+
         if mem.height:
             mpdf = mem.with_columns(
                 elapsed_s=pl.col("elapsed_ns") / 1e9,
@@ -196,6 +221,15 @@ def main(
                 facet_kws={"sharex": False, "sharey": False},
             )
             g.set_axis_labels("elapsed time (s)", "RSS (GiB)")
+            for seqlen, ax in g.axes_dict.items():
+                for (mode, s), gib in batch_gib.items():
+                    if s != int(seqlen):
+                        continue
+                    ax.axhline(gib, c="0.5", ls="--", lw=1)
+                    ax.text(
+                        ax.get_xlim()[1], gib, f"1 {mode} batch ({gib:.0f} GiB)",
+                        c="0.4", fontsize=6, va="bottom", ha="right",
+                    )
             g.savefig(fig_dir / "gvl027_mem_growth.png", dpi=150, bbox_inches="tight")
             print(f"WROTE {fig_dir / 'gvl027_mem_growth.png'}")
         else:
