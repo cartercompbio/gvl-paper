@@ -48,11 +48,14 @@ workflow {
     }
 
     lengths = channel.fromList([2048, 16384, 131072, 1048576])
-    // Buffered-only: the default `to_dataloader` (mode=none) is not benchmarked.
-    // Buffered is what the manuscript reports; its throughput is amortized over
-    // the buffer (per-minibatch torch-collate overhead dominates at tiny batch
-    // sizes, so the grid sweeps batch_size). See compare_to_baseline.py.
-    dl_modes = channel.fromList(["buffered"])
+    // Eager-only: `mode=none` is a plain torch DataLoader over to_torch_dataset,
+    // so every measured mini-batch is a real per-batch decode. This matches the
+    // 0.6.1 manuscript baseline exactly (0.6.1's to_dataloader had NO buffered
+    // path) and is artifact-free. The `buffered` mode was dropped: it decodes a
+    // super-batch (chunk) once then yields cheap slices, so a short measurement
+    // window clocks slice-handoff (>1 TB/s, above DRAM bandwidth) rather than
+    // real dataloading throughput. See compare_to_baseline.py / the design doc.
+    dl_modes = channel.fromList(["none"])
 
     // SVAR conversion bench (runs once, not per seqlen). Hap-safe filtering
     // (drop symbolic + breakend ALTs) is applied here so every SVAR is

@@ -80,10 +80,21 @@ GVL's API and performance both shifted across releases, so the env is split thre
   this env on each SLURM job). All GVL datasets are **SVAR-backed** (`bench_native`
   off by default); genoray 2.9.0's hap-safe filter (`~is_symbolic & ~is_breakend`,
   via `bin/_genoray_filter.py`) is applied at SVAR conversion. Each cell is run in
-  the `buffered` dataloader only (`buffer_bytes=2 GiB`); the default
-  `to_dataloader` (mode=none) is no longer benchmarked. (Buffered throughput is
-  amortized over the buffer — per-minibatch torch-collate/dispatch overhead
-  dominates at tiny batch sizes — so the grid sweeps batch_size.)
+  the **eager `mode=none` dataloader only** (plain torch `DataLoader` over
+  `to_torch_dataset`), so every measured mini-batch is a real per-batch decode.
+  This matches the 0.6.1 baseline exactly (0.6.1's `to_dataloader` had **no**
+  buffered path) and is artifact-free. **The `buffered` mode was tried first and
+  abandoned (2026-06-08):** `mode='buffered'` (`n_slots=1`, single-slot
+  super-batch — *not* the async `double_buffered`) decodes a whole chunk once via
+  `_buffered_loader.py` then yields cheap array slices, so a short measurement
+  window (the grid stops at `n_batches=10` for large batches) clocks
+  slice-handoff, reporting >1 TB/s — physically impossible above cn-03's ~35 GB/s
+  STREAM-Triad DRAM bandwidth, i.e. the bytes were never streamed. Eager mode has
+  no chunk to slice, so the artifact cannot occur. The grid still sweeps
+  batch_size (threads {1,4,16,32} × every-other-pow2 batch); `max_buffer_bytes`
+  and the per-cell buffer-sizing in `benchmark_{haps,tracks}.py` are dead code
+  under `mode=none` (no buffer is allocated, so the large-batch NaN problem also
+  disappears).
   `bin/benchmark_haps.py` / `benchmark_tracks.py` emit the
   reconciled schema `dataset,backend,dl_mode,threads,seqlen,batch_size,
   n_batches_measured,total_bytes,duration_ns,throughput (MiB/s)` (memory pass:

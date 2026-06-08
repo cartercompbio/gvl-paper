@@ -1,6 +1,7 @@
 #! /usr/bin/env python3
 
 # %%
+import glob
 from pathlib import Path
 
 import matplotlib.pyplot as plt
@@ -12,6 +13,40 @@ proj_dir = Path(__file__).parent.parent
 data_dir = proj_dir / "results"
 fig_dir = proj_dir / "figures"
 fig_dir.mkdir(parents=True, exist_ok=True)
+
+# The best-performance summary figures use the GVL 0.27.0 eager (mode=none)
+# full bench in results_gvl027/ (artifact-free per-batch decode; see CLAUDE.md).
+# FASTA/BigWig baselines are reused from the 0.6.1 manuscript CSVs (they are
+# independent of the GVL version). The horizontal reference is cn-03's max
+# sustained RAM bandwidth (STREAM Triad ~35 GB/s) — the real throughput ceiling
+# on this hardware — replacing the old A100 CPU->GPU PCIe line. The full-grid
+# hap_throughput/track_throughput figures below remain on the 0.6.1 data + the
+# 31.5 GB/s A100 line (the pinned manuscript numbers).
+RAM_BW_GBPS = 35.0
+RAM_BW_LABEL = "cn-03 max RAM\nbandwidth"
+GVL027_LABELS = {
+    "TCGA_ATAC": "GVL: TCGA BRCA ATAC (n=62)",
+    "1KGP": "GVL: 1000 Genomes (n=3,202)",
+    "UKBB": "GVL: Biobank (n=487,409)",
+}
+
+
+def gvl027_peak(result_glob: str) -> pl.DataFrame:
+    """Max eager (mode=none) throughput per (dataset, seqlen), in GB/s."""
+    files = sorted(glob.glob(str(proj_dir / result_glob)))
+    if not files:
+        raise FileNotFoundError(f"no GVL 0.27.0 result CSVs matched {result_glob!r}")
+    df = pl.concat([pl.read_csv(c) for c in files], how="vertical_relaxed").with_columns(
+        pl.col("throughput (MiB/s)").cast(pl.Float64, strict=False)
+    )
+    df = df.filter(
+        pl.col("throughput (MiB/s)").is_finite() & (pl.col("throughput (MiB/s)") > 0)
+    )
+    return (
+        df.group_by("dataset", "seqlen")
+        .agg(throughput=(pl.col("throughput (MiB/s)").max() * 2**20 / 1e9))
+        .sort("dataset", "seqlen")
+    )
 
 # %% hap data
 results = pl.read_csv(data_dir / "hap_results.csv").with_columns(
@@ -30,13 +65,11 @@ ref_results = (
 results = results.join(
     ref_results.select("seqlen", ref_throughput="throughput"), on=["seqlen"]
 ).with_columns(
-    pl.col("dataset").replace(
-        {
-            "tcga-atac": "GVL: TCGA BRCA ATAC (n=62)",
-            "1kgp": "GVL: 1000 Genomes (n=3,202)",
-            "ukbb": "GVL: Biobank (n=487,409)",
-        }
-    ),
+    pl.col("dataset").replace({
+        "tcga-atac": "GVL: TCGA BRCA ATAC (n=62)",
+        "1kgp": "GVL: 1000 Genomes (n=3,202)",
+        "ukbb": "GVL: Biobank (n=487,409)",
+    }),
     batch_mb=pl.col("batch_size") * pl.col("seqlen") / 1e6,
 )
 
@@ -58,16 +91,6 @@ pybigwig_results = (
 )
 track_results = track_results.join(
     pybigwig_results.select("seqlen", bigwig_throughput="throughput"), on="seqlen"
-)
-
-# %% track perf_ratio best perf
-track_perf_ratio = (
-    track_results.group_by("dataset", "seqlen")
-    .agg(
-        pl.col("throughput").max(),
-        perf_ratio=pl.col("throughput").max() / pl.col("bigwig_throughput").max(),
-    )
-    .sort("perf_ratio")
 )
 
 # %%
@@ -170,10 +193,10 @@ fg.savefig(fig_dir / "track_throughput.svg")
 fg.savefig(fig_dir / "track_throughput.png", dpi=150)
 
 # %%
-# best track results
+# best track results (GVL 0.27.0 eager vs 0.6.1 BigWig baseline; RAM-bw ceiling)
 fig, ax = plt.subplots()
 sns.lineplot(
-    data=track_perf_ratio.to_pandas(),
+    data=gvl027_peak("results_gvl027/tracks/*_none.csv").sort("seqlen").to_pandas(),
     x="seqlen",
     y="throughput",
     ax=ax,
@@ -193,11 +216,11 @@ sns.lineplot(
     solid_joinstyle="round",
     solid_capstyle="round",
 )
-ax.axhline(31.5, c="k", ls="--", alpha=0.5, linewidth=5)
+ax.axhline(RAM_BW_GBPS, c="k", ls="--", alpha=0.5, linewidth=5)
 ax.text(
     pybigwig_results["seqlen"].min() - 1000,  # pyright: ignore
-    31.5,
-    r"A100 CPU$\rightarrow$GPU" + "\ntransfer limit",
+    RAM_BW_GBPS,
+    RAM_BW_LABEL,
     va="center",
     ha="right",
 )
@@ -211,19 +234,12 @@ plt.tight_layout()
 plt.savefig(fig_dir / "best_track_performance.png", dpi=300)
 plt.savefig(fig_dir / "best_track_performance.svg")
 
-# %% perf_ratio
-perf_ratio = (
-    results.group_by("dataset", "seqlen")
-    .agg(
-        pl.col("throughput").max(),
-        perf_ratio=pl.col("throughput").max() / pl.col("ref_throughput").max(),
-    )
-    .sort("perf_ratio", descending=True)
+# %% best haplotype performance (GVL 0.27.0 eager vs 0.6.1 FASTA baseline; RAM-bw ceiling)
+gvl_haps = gvl027_peak("results_gvl027/haps/*_none.csv").with_columns(
+    pl.col("dataset").replace(GVL027_LABELS)
 )
-
-# %% best haplotype performance
 data = pl.concat(
-    [perf_ratio.drop("perf_ratio"), ref_results.with_columns(dataset=pl.lit("FASTA"))],
+    [gvl_haps, ref_results.with_columns(dataset=pl.lit("FASTA"))],
     how="diagonal_relaxed",
 ).rename({"dataset": "Dataset"})
 
@@ -245,11 +261,11 @@ fg = sns.relplot(
     aspect=0.6,
 )
 ax = fg.ax
-ax.axhline(31.5, c="k", ls="--", alpha=0.5, linewidth=3)
+ax.axhline(RAM_BW_GBPS, c="k", ls="--", alpha=0.5, linewidth=3)
 ax.text(
     ref_results["seqlen"].min() - 1000,  # pyright: ignore
-    40,
-    r"A100 CPU$\rightarrow$GPU" + "\ntransfer limit",
+    RAM_BW_GBPS,
+    RAM_BW_LABEL,
     va="center",
     ha="right",
 )
@@ -266,31 +282,29 @@ plt.savefig(fig_dir / "best_haplotype_performance.svg")
 # %% disk usage
 compressed_hg37 = 0.987
 compressed_hg38 = 0.875
-memory = pl.DataFrame(
-    {
-        "Dataset": [
-            "TCGA BRCA ATAC (n=62)",
-            "TCGA BRCA ATAC (n=62)",
-            "1000 Genomes (n=3,202)",
-            "1000 Genomes (n=3,202)",
-            "GDC (n=16,007)",
-            "GDC (n=16,007)",
-            "Biobank, chr22 (n=487,409)",
-            "Biobank, chr22 (n=487,409)",
-        ],
-        "Implementation": ["GVL", "FASTA"] * 4,
-        "Disk Space (GB)": [
-            0.173,
-            compressed_hg37 * 62 * 2,
-            3.1,
-            compressed_hg37 * 3202 * 2,
-            7.9,
-            compressed_hg38 * 16007,
-            30,
-            0.0096 * 487409 * 2,  # just chr22
-        ],
-    }
-)
+memory = pl.DataFrame({
+    "Dataset": [
+        "TCGA BRCA ATAC (n=62)",
+        "TCGA BRCA ATAC (n=62)",
+        "1000 Genomes (n=3,202)",
+        "1000 Genomes (n=3,202)",
+        "GDC (n=16,007)",
+        "GDC (n=16,007)",
+        "Biobank, chr22 (n=487,409)",
+        "Biobank, chr22 (n=487,409)",
+    ],
+    "Implementation": ["GVL", "FASTA"] * 4,
+    "Disk Space (GB)": [
+        0.173,
+        compressed_hg37 * 62 * 2,
+        3.1,
+        compressed_hg37 * 3202 * 2,
+        7.9,
+        compressed_hg38 * 16007,
+        30,
+        0.0096 * 487409 * 2,  # just chr22
+    ],
+})
 fg = sns.catplot(
     memory,
     x="Disk Space (GB)",
@@ -308,9 +322,10 @@ fg.savefig(fig_dir / "disk_usage.svg")
 
 # %%
 var_throughput = (
-    pl.read_csv(proj_dir / "results" / "variants_random_read_throughput_1kgp.csv")
+    pl.read_csv(proj_dir / "results" / "variants_batched_throughput_1kgp_par4_nb_gather.csv")
+    .rename({"presubset_bcf_time": "presub-bcf_time"})
     .unpivot(
-        ["svar_time", "bcf_time", "plink_time"],
+        ["svar_time", "bcf_time", "plink_time", "presub-bcf_time"],
         index=["query_length", "n_calls", "n_variants"],
         variable_name="filetype",
         value_name="time",
@@ -324,7 +339,6 @@ var_throughput = (
     )
 )
 
-q_len_name = r"$\log_{10}$ query length"
 print(
     var_throughput.filter(pl.col("filetype") == "SVAR")
     .drop("filetype")
@@ -350,12 +364,13 @@ print(
     .max()
 )
 
+q_len_name = r"$\log_{10}$ query length"
 data = var_throughput.with_columns(
     pl.col("query_length").log(10),
     log_vars_per_sec=(pl.col("n_variants") / pl.col("time") * 1e9).log(10),
 ).rename({"query_length": q_len_name, "filetype": "File type"})
 fg = sns.lmplot(
-    data.to_pandas(),
+    data,
     x=q_len_name,
     y="log_vars_per_sec",
     hue="File type",
@@ -365,9 +380,12 @@ fg = sns.lmplot(
 _ = fg.set(xlabel=q_len_name, ylabel=r"$\log_{10}$ variants/s")
 sns.move_legend(fg, "center left", bbox_to_anchor=(0.95, 0.5))
 fg.figure.tight_layout()
-fg.savefig(
-    fig_dir / "variant_throughput.png",
-    dpi=300,
-    bbox_inches="tight",
-)
-fg.savefig(fig_dir / "variant_throughput.svg")
+# fg.savefig(
+#     fig_dir / "variant_throughput.png",
+#     dpi=300,
+#     bbox_inches="tight",
+# )
+# fg.savefig(fig_dir / "variant_throughput.svg")
+
+# %%
+var_throughput.head()

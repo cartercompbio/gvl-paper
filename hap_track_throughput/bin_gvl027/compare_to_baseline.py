@@ -7,19 +7,22 @@ plots with matplotlib/seaborn (absent from bench027) and never imports GVL.
 Reads the Nextflow output layout under results_gvl027/:
     haps/{dataset}_{length}_{backend}_{dl_mode}.csv          (throughput)
     tracks/{dataset}_{length}_{backend}_{dl_mode}.csv        (throughput)
-    haps_memory/...   tracks_memory/...                      (peak/avg RSS)
+    haps_memory/...   tracks_memory/...                      (RSS-vs-time growth)
 
-Only the buffered dataloader is benchmarked (mode=none was dropped).
+Only the eager `mode=none` dataloader is benchmarked (buffered was dropped — its
+super-batch slicing made a short measurement window clock slice-handoff, >1 TB/s;
+see CLAUDE.md). The memory pass emits an RSS-vs-time growth curve at a single
+operating point (largest batch), not a peak/avg sweep.
 
 Outputs:
-  results_gvl027/parity_summary.csv  — buffered throughput joined to the 0.6.1
+  results_gvl027/parity_summary.csv  — eager throughput joined to the 0.6.1
        baseline on (dataset,mode,threads,seqlen,batch_size); ratio = v027/v061.
-       INTERNAL sanity check, not a paper deliverable. NB buffered throughput is
-       batch-size-amortized, so the ratio is most meaningful at larger batch sizes.
-  results_gvl027/memory_summary.csv  — per (dataset,mode,dl_mode,seqlen,batch_size)
-       peak/avg RSS, absolute (no baseline join).
-  figures/gvl027_parity.png          — v061-vs-v027 buffered-throughput scatter.
-  figures/gvl027_peak_rss.png        — peak RSS vs batch_size, faceted by seqlen.
+       INTERNAL sanity check, not a paper deliverable. 0.27.0 runs on cn-03, the
+       0.6.1 baseline on faster hardware, so ratio < 1 is expected.
+  results_gvl027/memory_growth_summary.csv  — per (dataset,mode,seqlen,batch_size)
+       start/end/peak RSS + duration of the growth curve, absolute (no baseline).
+  figures/gvl027_parity.png          — v061-vs-v027 eager-throughput scatter.
+  figures/gvl027_mem_growth.png      — RSS vs elapsed time, faceted by seqlen.
 """
 
 from pathlib import Path
@@ -106,12 +109,12 @@ def main(
             .agg(pl.col("v061").median())
         )
 
-        # internal parity: buffered (the only benchmarked dl_mode) vs baseline.
-        # NB buffered throughput is batch-size-amortized, so the ratio is most
-        # meaningful at the larger batch sizes; small-batch cells carry torch
-        # per-minibatch overhead absent from the 0.6.1 default loader.
-        buffered = tput.filter(pl.col("dl_mode") == "buffered")
-        joined = buffered.join(
+        # internal parity: eager mode=none (the only benchmarked dl_mode) vs the
+        # 0.6.1 baseline. Both are real per-batch decodes (0.6.1 had no buffered
+        # path), so this is apples-to-apples; 0.27.0 on cn-03 vs 0.6.1 on faster
+        # hardware means ratio < 1 is expected and not a regression signal per se.
+        eager = tput.filter(pl.col("dl_mode") == "none")
+        joined = eager.join(
             base, on=["dataset_norm", "mode", "threads", "seqlen", "batch_size"], how="left"
         ).with_columns(ratio=(pl.col("v027") / pl.col("v061")))
         summary = results_dir / "parity_summary.csv"
@@ -142,44 +145,61 @@ def main(
     else:
         print("No throughput CSVs found under haps/ or tracks/ — skipping throughput report.")
 
-    # ---------- memory ----------
+    # ---------- memory (RSS-vs-time growth) ----------
+    # The memory pass emits one row per RSS sample (schema: ...,elapsed_ns,
+    # rss_bytes) at a single operating point per (dataset,seqlen), not a
+    # peak/avg sweep. Summarize start/end/peak per curve; plot RSS vs time.
     mem_frames = [
         f
         for f in (_load_dir(results_dir, d) for d in ("haps_memory", "tracks_memory"))
         if f is not None
     ]
     if mem_frames:
-        mem = pl.concat(mem_frames, how="vertical_relaxed")
-        mem = (
-            mem.with_columns(
-                pl.col("peak_rss_bytes").cast(pl.Float64, strict=False).fill_nan(None),
-                pl.col("avg_rss_bytes").cast(pl.Float64, strict=False).fill_nan(None),
-            )
-            .drop_nulls("peak_rss_bytes")
-            .group_by(["dataset_norm", "mode", "dl_mode", "seqlen", "batch_size"])
+        mem = pl.concat(mem_frames, how="vertical_relaxed").with_columns(
+            pl.col("rss_bytes").cast(pl.Float64, strict=False),
+            pl.col("elapsed_ns").cast(pl.Float64, strict=False),
+        ).drop_nulls("rss_bytes")
+
+        summary = (
+            mem.sort("elapsed_ns")
+            .group_by(["dataset_norm", "mode", "seqlen", "batch_size"])
             .agg(
-                pl.col("peak_rss_bytes").max().alias("peak_rss_bytes"),
-                pl.col("avg_rss_bytes").mean().alias("avg_rss_bytes"),
+                pl.col("rss_bytes").first().alias("rss_start_bytes"),
+                pl.col("rss_bytes").last().alias("rss_end_bytes"),
+                pl.col("rss_bytes").max().alias("rss_peak_bytes"),
+                (pl.col("elapsed_ns").max() / 1e9).alias("duration_s"),
+                pl.len().alias("n_samples"),
             )
+            .with_columns(
+                growth_bytes=pl.col("rss_peak_bytes") - pl.col("rss_start_bytes")
+            )
+            .sort(["dataset_norm", "mode", "seqlen"])
         )
-        mem_out = results_dir / "memory_summary.csv"
-        mem.sort(["dataset_norm", "mode", "dl_mode", "seqlen", "batch_size"]).write_csv(mem_out)
-        print(f"WROTE {mem_out} ({mem.height} rows)")
+        mem_out = results_dir / "memory_growth_summary.csv"
+        summary.write_csv(mem_out)
+        print(f"WROTE {mem_out} ({summary.height} curves)")
+        print(
+            summary.with_columns(
+                start_gib=(pl.col("rss_start_bytes") / 2**30).round(2),
+                peak_gib=(pl.col("rss_peak_bytes") / 2**30).round(2),
+            ).select("dataset_norm", "mode", "seqlen", "batch_size", "start_gib", "peak_gib", "duration_s")
+        )
 
         if mem.height:
-            mpdf = mem.with_columns(peak_gib=pl.col("peak_rss_bytes") / 2**30).to_pandas()
+            mpdf = mem.with_columns(
+                elapsed_s=pl.col("elapsed_ns") / 1e9,
+                rss_gib=pl.col("rss_bytes") / 2**30,
+            ).to_pandas()
             g = sns.relplot(
-                data=mpdf, x="batch_size", y="peak_gib", hue="dataset_norm", style="dl_mode",
-                col="seqlen", col_wrap=2, kind="line", marker="o",
+                data=mpdf, x="elapsed_s", y="rss_gib", hue="dataset_norm", style="mode",
+                col="seqlen", col_wrap=2, kind="line", estimator=None,
                 facet_kws={"sharex": False, "sharey": False},
             )
-            for ax in g.axes.flat:
-                ax.set_xscale("log", base=2)
-            g.set_axis_labels("batch_size", "peak RSS (GiB)")
-            g.savefig(fig_dir / "gvl027_peak_rss.png", dpi=150, bbox_inches="tight")
-            print(f"WROTE {fig_dir / 'gvl027_peak_rss.png'}")
+            g.set_axis_labels("elapsed time (s)", "RSS (GiB)")
+            g.savefig(fig_dir / "gvl027_mem_growth.png", dpi=150, bbox_inches="tight")
+            print(f"WROTE {fig_dir / 'gvl027_mem_growth.png'}")
         else:
-            print("No valid memory rows after drop_nulls — skipping memory plot.")
+            print("No valid memory samples after drop_nulls — skipping memory plot.")
     else:
         print("No memory CSVs found under haps_memory/ or tracks_memory/ — skipping memory report.")
 

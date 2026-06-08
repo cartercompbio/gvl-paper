@@ -3,6 +3,23 @@
 **Date:** 2026-06-06
 **Branch:** feat/gvl-026-parity-probe
 
+> **CORRECTION (2026-06-08): switched from `buffered` to eager `mode=none`.**
+> The "amortization artifact" noted below for the memory pass turned out to
+> contaminate the *throughput* numbers too, fatally. `mode='buffered'`
+> (`n_slots=1`, single-slot super-batch in GVL's `_buffered_loader.py` — *not*
+> the async `double_buffered`) decodes a whole chunk once, then yields cheap
+> array slices. With the grid's short measurement window (`n_batches=10` at large
+> batch), the timer clocks slice-handoff, not real dataloading — a 1KGP haps cell
+> reported **4,355 GB/s** in a 0.31 ms window, physically impossible above
+> cn-03's ~35 GB/s STREAM-Triad DRAM bandwidth. Eager `mode=none` (plain torch
+> `DataLoader`, real per-batch decode) has no chunk to slice, so the artifact
+> cannot occur, and it matches the 0.6.1 baseline exactly (0.6.1 had no buffered
+> path). The harness now runs `dl_modes = ["none"]`; the per-cell buffer-sizing /
+> `max_buffer_bytes` machinery is dead code under `mode=none` (and the large-batch
+> NaN problem disappears with it). Buffered full-bench outputs were archived to
+> `results_gvl027/_buffered_archive/`. Everything below describing "buffered"
+> applies historically only.
+
 ## Goal
 
 Run the full GVL 0.27.0 throughput + memory benchmark via the Nextflow harness
