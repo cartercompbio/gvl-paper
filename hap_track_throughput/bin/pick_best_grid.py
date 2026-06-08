@@ -26,8 +26,12 @@ def main(
     haps_dir: Path,
     tracks_dir: Path,
     out_dir: Path,
+    mode: str = "largest",  # "largest" (peak-RAM batch) or "argmax" (best tput)
 ):
     import polars as pl
+
+    if mode not in ("largest", "argmax"):
+        raise ValueError(f"mode must be 'largest' or 'argmax', got {mode!r}")
 
     out_dir.mkdir(parents=True, exist_ok=True)
     n_written = 0
@@ -50,15 +54,24 @@ def main(
         )
         if df.is_empty():
             continue
-        # mean throughput per cell, then argmax per (dataset, seqlen)
+        # mean throughput per cell
         agg = df.group_by("dataset", "seqlen", "threads", "batch_size").agg(
             pl.col("throughput (MiB/s)").mean().alias("tput")
         )
-        best = (
-            agg.sort("tput", descending=True)
-            .group_by("dataset", "seqlen", maintain_order=True)
-            .first()
-        )
+        if mode == "argmax":
+            # highest mean throughput per (dataset, seqlen)
+            best = (
+                agg.sort("tput", descending=True)
+                .group_by("dataset", "seqlen", maintain_order=True)
+                .first()
+            )
+        else:
+            # largest valid batch (peak-RAM, monotonic), tie-break highest threads
+            best = (
+                agg.sort(["batch_size", "threads"], descending=True)
+                .group_by("dataset", "seqlen", maintain_order=True)
+                .first()
+            )
         for row in best.iter_rows(named=True):
             dataset, seqlen = row["dataset"], int(row["seqlen"])
             t, bs = int(row["threads"]), int(row["batch_size"])

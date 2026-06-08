@@ -35,13 +35,16 @@ for cfg in "${CONFIGS[@]}"; do
   nextflow run benchmark.nf -profile gvl027 -c "$cfg" -resume
 done
 
-# 2) Derive best-throughput operating points (one row per dataset x seqlen).
+# 2) Derive the largest-batch (peak-RAM) operating point per dataset x seqlen.
 echo "=== PICK BEST GRID  $(date) ==="
 pixi run -e default python bin/pick_best_grid.py \
-  "$RES/haps" "$RES/tracks" "$BEST_GRID"
+  "$RES/haps" "$RES/tracks" "$BEST_GRID" --mode largest
 
-# 3) Memory pass at only the best operating point.
-for cfg in "${CONFIGS[@]}"; do
+# 3) Memory pass: RSS-vs-time growth curve at that point. Only 1kgp + tcga-atac
+#    (two datasets are enough to show the mmap growth behavior generalizes;
+#    ukbb's huge sample count is not needed and is the heaviest to write).
+MEM_CONFIGS=(configs/1kgp.config configs/tcga-atac.config)
+for cfg in "${MEM_CONFIGS[@]}"; do
   echo "=== MEMORY $cfg  $(date) ==="
   nextflow run benchmark.nf -profile gvl027 -c "$cfg" \
     --measure_memory --best_grid_dir "$BEST_GRID" -resume

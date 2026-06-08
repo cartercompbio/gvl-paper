@@ -23,6 +23,10 @@ MEMORY_HEADER = (
     "dataset,backend,dl_mode,threads,seqlen,batch_size,"
     "avg_rss_bytes,peak_rss_bytes\n"
 )
+MEMORY_TS_HEADER = (
+    "dataset,backend,dl_mode,threads,seqlen,batch_size,"
+    "elapsed_ns,rss_bytes\n"
+)
 
 
 @dataclass

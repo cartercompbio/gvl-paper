@@ -63,18 +63,30 @@ the per-(dataset,seqlen) *peak*.
   points/seqlen vs 14–23.
 - ≈ 1/3 the cells; same four figures qualitatively.
 
-## Memory at the best-throughput operating point (no sweep)
+## Memory: RSS growth at the largest-batch operating point (no sweep)
 
-- After the throughput pass, `bin/pick_best_grid.py` reads
-  `results_gvl027/haps/*.csv` and `tracks/*.csv`, aggregates replicates by mean
-  throughput, and for each `(dataset, seqlen)` (separately for haps vs tracks)
-  emits a one-row grid CSV (`threads, batch_size, n_batches`) at the argmax-
-  throughput cell, into `results_gvl027/best_grid/`.
-- The memory pass measures peak/avg RSS only at that point: ~12 haps + 4 track
-  cells total.
-- **Caveat (intended):** peak RSS is monotonic in batch size, so this reports
-  RAM *at the throughput-optimal operating point*, not worst-case-largest-batch
-  RAM. This is a deliberate change from the 0.6.1-style memory batch-sweep.
+Revised after observing that buffered throughput at small/moderate batches is an
+**amortization artifact** (the 2 GiB buffer holds many minibatches, so the short
+measurement window never drains it — throughput reads in the millions of MiB/s).
+The argmax-throughput cell therefore lands on tiny batches whose RSS is just the
+floor buffer — uninformative. Instead:
+
+- `bin/pick_best_grid.py --mode largest` picks, per `(dataset, seqlen)`, the
+  **largest batch_size among valid (non-NaN) throughput cells** (= largest batch
+  within the 64 GiB buffer cap), at the highest thread count. Peak RSS is
+  monotonic in batch size, so this is the peak-RAM operating point.
+- The memory pass then captures an **RSS-vs-time growth curve** at that point:
+  a background sampler records `(elapsed_ns, rss_bytes)` at ~2 Hz, flushed
+  incrementally, while the dataloader is iterated for a fixed window
+  (`growth_time_s`, default 180 s). Hypothesis: mmap-backed RSS climbs as pages
+  fault in and does not settle at a small working set; within the SLURM `--mem`
+  cgroup it plateaus near the cap (kernel reclaims clean file-backed pages) —
+  the curve demonstrates the unbounded working set without swapping the shared
+  node. Peak/avg are derivable from the series.
+- Run for **1kgp + tcga-atac only** (haps for both; tracks for tcga-atac) — two
+  datasets are enough to show the behavior generalizes; ukbb is skipped.
+- Output schema: `dataset,backend,dl_mode,threads,seqlen,batch_size,elapsed_ns,
+  rss_bytes` in `results_gvl027/{haps_memory,tracks_memory}/`.
 
 ## Implementation
 

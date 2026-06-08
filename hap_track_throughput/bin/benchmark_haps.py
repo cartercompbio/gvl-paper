@@ -25,13 +25,15 @@ def bench(
     burn_in: int = 1,
     replicates: int = 3,
     measure_memory: bool = False,
+    memory_timeseries: bool = False,  # emit RSS-vs-time growth curve per cell
+    growth_time_s: float = 180.0,  # iteration window for the growth curve
     time_limit_s: float = 45.0,
     min_batches: int = 5,
 ):
     import gc
     import os
     from itertools import product
-    from time import sleep
+    from time import perf_counter_ns, sleep
 
     import genvarloader as gvl
     import numba as nb
@@ -89,7 +91,46 @@ def bench(
             return None
         return {"mode": "buffered", "buffer_bytes": max(buffer_bytes, required)}
 
-    if measure_memory:
+    def _drive(dl, dur_ns: int) -> None:
+        """Iterate the dataloader (re-epoching) for ~dur_ns to fault in pages."""
+        t0 = perf_counter_ns()
+        while perf_counter_ns() - t0 < dur_ns:
+            empty = True
+            for _ in dl:
+                empty = False
+                if perf_counter_ns() - t0 >= dur_ns:
+                    break
+            if empty:
+                break
+
+    if measure_memory and memory_timeseries:
+        # RSS growth curve at the (single, largest-batch) operating point.
+        from _bench_common import MEMORY_TS_HEADER
+        from _mem_sampler import RssTimeSeriesSampler
+
+        growth_ns = int(growth_time_s * 1e9)
+        with open(results, "w") as f:
+            f.write(MEMORY_TS_HEADER)
+            f.flush()
+            for n_thread, batch_size, n_batches in grid.iter_rows():
+                nb.set_num_threads(n_thread)
+                kw = cell_dl_kwargs(batch_size)
+                if kw is None:
+                    print(f"SKIP growth t={n_thread} bs={batch_size}: buffer > cap", flush=True)
+                    continue
+                try:
+                    dl = ds.to_dataloader(batch_size=batch_size, shuffle=False, **kw)
+                except ValueError as e:
+                    print(f"SKIP growth t={n_thread} bs={batch_size}: {e}", flush=True)
+                    continue
+                prefix = f"{dataset},{backend},{dl_mode},{n_thread},{length},{batch_size}"
+                with RssTimeSeriesSampler(f, prefix, interval_s=0.5) as s:
+                    _drive(dl, growth_ns)
+                print(f"growth t={n_thread} bs={batch_size}: peak={s.peak} avg={s.avg}", flush=True)
+                del dl
+                gc.collect()
+                sleep(0.5)
+    elif measure_memory:
         from _mem_sampler import PeakRssSampler
 
         with open(results, "w") as f:

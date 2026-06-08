@@ -25,6 +25,9 @@ params {
     // buffer per cell up to this cap (cells needing more are recorded NaN). 64 GiB
     // covers the full haps range and tracks through saturation. See compare doc.
     max_buffer_bytes: Integer = 68719476736
+    // Memory pass emits an RSS-vs-time growth curve (largest-batch operating
+    // point) over this many seconds, instead of a single peak/avg row.
+    growth_time_s: Integer = 180
     results_dir: String = "${projectDir}/../results_gvl027"
     // When set (memory pass), BENCH_HAPS/BENCH_TRACKS read a derived
     // best-throughput one-row grid from here instead of make_launch_grid.py.
@@ -208,7 +211,7 @@ process BENCH_HAPS {
     script:
     min_npb_arg = params.min_npb != null ? "--min-npb ${params.min_npb}" : ""
     test_arg = params.test_grid ? "--test" : ""
-    mem_flag = params.measure_memory ? "--measure-memory" : ""
+    mem_flag = params.measure_memory ? "--measure-memory --memory-timeseries --growth-time-s ${params.growth_time_s}" : ""
     use_best = params.measure_memory && params.best_grid_dir != null
     make_grid = use_best ?
         "cp ${params.best_grid_dir}/${params.dataset}_${ds.length}_haps.csv grid_${ds.length}.csv" :
@@ -247,7 +250,7 @@ process BENCH_TRACKS {
     script:
     min_npb_arg = params.min_npb != null ? "--min-npb ${params.min_npb}" : ""
     test_arg = params.test_grid ? "--test" : ""
-    mem_flag = params.measure_memory ? "--measure-memory" : ""
+    mem_flag = params.measure_memory ? "--measure-memory --memory-timeseries --growth-time-s ${params.growth_time_s}" : ""
     use_best = params.measure_memory && params.best_grid_dir != null
     make_grid = use_best ?
         "cp ${params.best_grid_dir}/${params.dataset}_${ds.length}_tracks.csv grid_${ds.length}.csv" :
