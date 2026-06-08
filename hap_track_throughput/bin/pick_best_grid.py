@@ -38,6 +38,11 @@ def main(
         if not csvs:
             continue
         df = pl.concat([pl.read_csv(c) for c in csvs], how="vertical_relaxed")
+        # The throughput column reads as str when any cell is the literal "nan"
+        # (e.g. tracks cells over the buffer cap), so cast before comparing.
+        df = df.with_columns(
+            pl.col("throughput (MiB/s)").cast(pl.Float64, strict=False)
+        )
         # keep only valid measurements
         df = df.filter(
             pl.col("throughput (MiB/s)").is_finite()
