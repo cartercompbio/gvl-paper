@@ -110,3 +110,4 @@ i-kernel = "ipython kernel install --user --name gvl-basenji2"
 
 [pypi-dependencies]
 pyranges1 = ">=1.3.2, <2"
+pytest = ">=9.0.3, <10"
