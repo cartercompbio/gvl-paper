@@ -13,7 +13,7 @@ params {
     n_replicates: Integer = 5
     stream_batches: Integer = 64
     bp_budget: Integer = 16777216
-    min_seconds: Double = 5.0
+    min_seconds: Double = 5.0d
     min_batches: Integer = 10
     query_lengths: List<Integer> = [2048, 4096, 8192, 16384, 32768, 65536, 131072, 262144, 524288, 1048576, 2097152, 4194304, 8388608, 16777216]
     use_custom_pack: Boolean = true
