@@ -11,8 +11,10 @@ params {
     fai: Path
     seed: Integer = 0
     n_replicates: Integer = 5
-    max_pairs: Integer = 100
-    max_total_length: Integer = 16777216
+    stream_batches: Integer = 64
+    bp_budget: Integer = 16777216
+    min_seconds: Double = 5.0
+    min_batches: Integer = 10
     query_lengths: List<Integer> = [2048, 4096, 8192, 16384, 32768, 65536, 131072, 262144, 524288, 1048576, 2097152, 4194304, 8388608, 16777216]
     use_custom_pack: Boolean = true
     sample_sizes: List<Integer> = [10, 32, 100, 316, 1000, 3202]
@@ -34,9 +36,9 @@ workflow {
     pairs_raw = GENERATE_PAIRS(
         lengths,
         params.n_replicates,
-        params.max_pairs,
+        params.stream_batches,
         params.seed,
-        params.max_total_length,
+        params.bp_budget,
         n_full,
     )
     pairs = pairs_raw.map { r ->
@@ -92,9 +94,9 @@ workflow {
         triples,
         params.n_sweep_query_length,
         params.n_replicates,
-        params.max_pairs,
+        params.stream_batches,
         params.seed,
-        params.max_total_length,
+        params.bp_budget,
     )
 
     all_inputs = pairs.mix(n_pairs)
@@ -197,9 +199,9 @@ process GENERATE_PAIRS {
     input:
     query_length: Integer
     n_replicates: Integer
-    max_pairs: Integer
+    stream_batches: Integer
     seed: Integer
-    max_total_length: Integer
+    bp_budget: Integer
     n_samples_full: Integer
 
     script:
@@ -211,8 +213,8 @@ process GENERATE_PAIRS {
       pairs_${query_length}.parquet \\
       --seed ${seed} \\
       --n-replicates ${n_replicates} \\
-      --max-pairs ${max_pairs} \\
-      --max-total-length ${max_total_length}
+      --stream-batches ${stream_batches} \\
+      --bp-budget ${bp_budget}
     """
 
     output:
@@ -328,9 +330,9 @@ process GENERATE_PAIRS_N {
     t: SubsetTriple
     query_length: Integer
     n_replicates: Integer
-    max_pairs: Integer
+    stream_batches: Integer
     seed: Integer
-    max_total_length: Integer
+    bp_budget: Integer
 
     script:
     """
@@ -341,8 +343,8 @@ process GENERATE_PAIRS_N {
       pairs_N${t.n}.parquet \\
       --seed ${seed} \\
       --n-replicates ${n_replicates} \\
-      --max-pairs ${max_pairs} \\
-      --max-total-length ${max_total_length}
+      --stream-batches ${stream_batches} \\
+      --bp-budget ${bp_budget}
     """
 
     output:
@@ -379,7 +381,9 @@ process BENCH_SVAR_THROUGHPUT {
       --dataset ${params.dataset} \\
       --mode throughput \\
       ${pack_flag} \\
-      --n-samples ${p.n_samples}
+      --n-samples ${p.n_samples} \\
+      --min-seconds ${params.min_seconds} \\
+      --min-batches ${params.min_batches}
     """
 
     output:
@@ -406,7 +410,9 @@ process BENCH_SVAR_MEMORY {
       --dataset ${params.dataset} \\
       --mode memory \\
       ${pack_flag} \\
-      --n-samples ${p.n_samples}
+      --n-samples ${p.n_samples} \\
+      --min-seconds ${params.min_seconds} \\
+      --min-batches ${params.min_batches}
     """
 
     output:
@@ -431,7 +437,9 @@ process BENCH_BCF_THROUGHPUT {
       bcf_q${p.query_length}_n${p.n_samples}_throughput.csv \\
       --dataset ${params.dataset} \\
       --mode throughput \\
-      --n-samples ${p.n_samples}
+      --n-samples ${p.n_samples} \\
+      --min-seconds ${params.min_seconds} \\
+      --min-batches ${params.min_batches}
     """
 
     output:
@@ -456,7 +464,9 @@ process BENCH_BCF_MEMORY {
       bcf_q${p.query_length}_n${p.n_samples}_memory.csv \\
       --dataset ${params.dataset} \\
       --mode memory \\
-      --n-samples ${p.n_samples}
+      --n-samples ${p.n_samples} \\
+      --min-seconds ${params.min_seconds} \\
+      --min-batches ${params.min_batches}
     """
 
     output:
@@ -481,7 +491,9 @@ process BENCH_PGEN_THROUGHPUT {
       pgen_q${p.query_length}_n${p.n_samples}_throughput.csv \\
       --dataset ${params.dataset} \\
       --mode throughput \\
-      --n-samples ${p.n_samples}
+      --n-samples ${p.n_samples} \\
+      --min-seconds ${params.min_seconds} \\
+      --min-batches ${params.min_batches}
     """
 
     output:
@@ -506,7 +518,9 @@ process BENCH_PGEN_MEMORY {
       pgen_q${p.query_length}_n${p.n_samples}_memory.csv \\
       --dataset ${params.dataset} \\
       --mode memory \\
-      --n-samples ${p.n_samples}
+      --n-samples ${p.n_samples} \\
+      --min-seconds ${params.min_seconds} \\
+      --min-batches ${params.min_batches}
     """
 
     output:
@@ -531,7 +545,9 @@ process BENCH_PRESUBSET_BCF_THROUGHPUT {
       presubset_bcf_q${p.query_length}_n${p.n_samples}_throughput.csv \\
       --dataset ${params.dataset} \\
       --mode throughput \\
-      --n-samples ${p.n_samples}
+      --n-samples ${p.n_samples} \\
+      --min-seconds ${params.min_seconds} \\
+      --min-batches ${params.min_batches}
     """
 
     output:
@@ -556,7 +572,9 @@ process BENCH_PRESUBSET_BCF_MEMORY {
       presubset_bcf_q${p.query_length}_n${p.n_samples}_memory.csv \\
       --dataset ${params.dataset} \\
       --mode memory \\
-      --n-samples ${p.n_samples}
+      --n-samples ${p.n_samples} \\
+      --min-seconds ${params.min_seconds} \\
+      --min-batches ${params.min_batches}
     """
 
     output:
