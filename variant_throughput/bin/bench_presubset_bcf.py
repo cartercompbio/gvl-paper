@@ -9,6 +9,9 @@ from typing import Literal
 
 from cyclopts import run
 
+from _pairs import split_pair_batches
+from _streaming import drive_loop, prime, run_stream
+
 
 def _subset_pairs(
     bcf: Path,
@@ -69,6 +72,8 @@ def bench(
     dataset: str = "",
     mode: Literal["throughput", "memory"] = "throughput",
     n_samples: int = 0,
+    min_seconds: float = 5.0,
+    min_batches: int = 10,
 ):
     import polars as pl
 
@@ -80,58 +85,61 @@ def bench(
 
     for rep_val, group in df.group_by("replicate", maintain_order=True):
         rep = rep_val[0] if isinstance(rep_val, tuple) else rep_val
-        pairs = [
-            ((row["contig"], int(row["start"]), int(row["end"])), row["sample"])
-            for row in group.iter_rows(named=True)
-        ]
-        if not pairs:
+        batches = split_pair_batches(group)
+        if not batches:
             continue
+        n_pairs = sum(len(pairs) for pairs in batches)
 
-        tmp_paths: list[str] = []
+        # AOT: pre-subset each batch into temp BCFs (cached); timed once -> setup_ns.
+        t0 = perf_counter_ns()
+        batch_tmp = [_subset_pairs(bcf, pairs, tmp_dir) for pairs in batches]
+        setup_ns = perf_counter_ns() - t0
+
+        def gather(tmp_paths) -> int:
+            return _read_subsets(tmp_paths)
+
         try:
             if mode == "throughput":
-                t0 = perf_counter_ns()
-                tmp_paths = _subset_pairs(bcf, pairs, tmp_dir)
-                subset_ns = perf_counter_ns() - t0
-
-                t0 = perf_counter_ns()
-                n_calls = _read_subsets(tmp_paths)
-                read_ns = perf_counter_ns() - t0
-
+                res = run_stream(
+                    gather, batch_tmp, min_seconds=min_seconds, min_batches=min_batches
+                )
                 rows_out.append({
                     "dataset": dataset or bcf.name,
                     "method": "presubset_bcf",
                     "query_length": q_len,
                     "n_samples": int(n_samples),
                     "replicate": int(rep),
-                    "n_pairs": len(pairs),
-                    "n_calls": n_calls,
-                    "elapsed_ns": read_ns,
-                    "setup_ns": subset_ns,
+                    "n_pairs": n_pairs,
+                    "n_calls": res.distinct_calls,
+                    "elapsed_ns": res.elapsed_ns,
+                    "setup_ns": setup_ns,
                 })
             else:
                 from _mem_sampler import PeakRssSampler
 
-                tmp_paths = _subset_pairs(bcf, pairs, tmp_dir)
+                distinct_calls = sum(gather(tp) for tp in batch_tmp)
+                prime(gather, batch_tmp)
                 with PeakRssSampler() as s:
-                    n_calls = _read_subsets(tmp_paths)
-
+                    drive_loop(
+                        gather, batch_tmp, min_seconds=min_seconds, min_batches=min_batches
+                    )
                 rows_out.append({
                     "dataset": dataset or bcf.name,
                     "method": "presubset_bcf",
                     "query_length": q_len,
                     "n_samples": int(n_samples),
                     "replicate": int(rep),
-                    "n_pairs": len(pairs),
-                    "n_calls": n_calls,
+                    "n_pairs": n_pairs,
+                    "n_calls": distinct_calls,
                     "peak_rss_bytes": s.peak,
                 })
         finally:
-            for path in tmp_paths:
-                try:
-                    os.unlink(path)
-                except FileNotFoundError:
-                    pass
+            for tmp_paths in batch_tmp:
+                for path in tmp_paths:
+                    try:
+                        os.unlink(path)
+                    except FileNotFoundError:
+                        pass
 
     pl.DataFrame(rows_out).write_csv(output)
 
