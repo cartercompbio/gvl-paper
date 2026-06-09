@@ -90,15 +90,18 @@ def bench(
             continue
         n_pairs = sum(len(pairs) for pairs in batches)
 
-        # AOT: pre-subset each batch into temp BCFs (cached); timed once -> setup_ns.
-        t0 = perf_counter_ns()
-        batch_tmp = [_subset_pairs(bcf, pairs, tmp_dir) for pairs in batches]
-        setup_ns = perf_counter_ns() - t0
+        # AOT: pre-subset each batch into temp BCFs (not re-done per epoch); timed once -> setup_ns.
+        batch_tmp: list[list[str]] = []
 
         def gather(tmp_paths) -> int:
             return _read_subsets(tmp_paths)
 
         try:
+            t0 = perf_counter_ns()
+            for pairs in batches:
+                batch_tmp.append(_subset_pairs(bcf, pairs, tmp_dir))
+            setup_ns = perf_counter_ns() - t0
+
             if mode == "throughput":
                 res = run_stream(
                     gather, batch_tmp, min_seconds=min_seconds, min_batches=min_batches
