@@ -13,6 +13,9 @@ from genoray import SparseVar
 from numba import njit, prange
 from numpy.typing import NDArray
 
+from _pairs import split_pair_batches
+from _streaming import drive_loop, prime, run_stream
+
 
 @njit(parallel=True, nogil=True, cache=True)
 def _gather_parallel(
@@ -120,6 +123,8 @@ def bench(
     mode: Literal["throughput", "memory"] = "throughput",
     use_custom_pack: bool = True,
     n_samples: int = 0,
+    min_seconds: float = 5.0,
+    min_batches: int = 10,
 ):
     import polars as pl
 
@@ -141,48 +146,54 @@ def bench(
 
     for rep_val, group in df.group_by("replicate", maintain_order=True):
         rep = rep_val[0] if isinstance(rep_val, tuple) else rep_val
-        pairs = [
-            ((row["contig"], int(row["start"]), int(row["end"])), row["sample"])
-            for row in group.iter_rows(named=True)
-        ]
-        if not pairs:
+        batches = split_pair_batches(group)
+        if not batches:
             continue
 
+        # AOT index search (cached ahead of training); timed once -> setup_ns.
+        t0 = perf_counter_ns()
+        cached = [_svar_search(_svar, pairs) for pairs in batches]
+        setup_ns = perf_counter_ns() - t0
+        # payload per batch: (flat_starts, flat_ends, n_calls)
+        payloads = [(fs, fe, nc) for (fs, fe, nc) in cached]
+        n_pairs = sum(len(pairs) for pairs in batches)
+
+        def gather(p) -> int:
+            _svar_pack(_svar, p[0], p[1], use_custom_pack)
+            return p[2]
+
         if mode == "throughput":
-            t0 = perf_counter_ns()
-            flat_starts, flat_ends, n_calls = _svar_search(_svar, pairs)
-            search_ns = perf_counter_ns() - t0
-
-            t0 = perf_counter_ns()
-            _svar_pack(_svar, flat_starts, flat_ends, use_custom_pack)
-            pack_ns = perf_counter_ns() - t0
-
+            res = run_stream(
+                gather, payloads, min_seconds=min_seconds, min_batches=min_batches
+            )
             rows_out.append({
                 "dataset": dataset or svar.name,
                 "method": "svar",
                 "query_length": q_len,
                 "n_samples": int(n_samples),
                 "replicate": int(rep),
-                "n_pairs": len(pairs),
-                "n_calls": n_calls,
-                "elapsed_ns": pack_ns,
-                "setup_ns": search_ns,
+                "n_pairs": n_pairs,
+                "n_calls": res.distinct_calls,
+                "elapsed_ns": res.elapsed_ns,
+                "setup_ns": setup_ns,
             })
         else:
             from _mem_sampler import PeakRssSampler
 
-            flat_starts, flat_ends, n_calls = _svar_search(_svar, pairs)
+            distinct_calls = sum(p[2] for p in payloads)
+            prime(gather, payloads)
             with PeakRssSampler() as s:
-                _svar_pack(_svar, flat_starts, flat_ends, use_custom_pack)
-
+                drive_loop(
+                    gather, payloads, min_seconds=min_seconds, min_batches=min_batches
+                )
             rows_out.append({
                 "dataset": dataset or svar.name,
                 "method": "svar",
                 "query_length": q_len,
                 "n_samples": int(n_samples),
                 "replicate": int(rep),
-                "n_pairs": len(pairs),
-                "n_calls": n_calls,
+                "n_pairs": n_pairs,
+                "n_calls": distinct_calls,
                 "peak_rss_bytes": s.peak,
             })
 
