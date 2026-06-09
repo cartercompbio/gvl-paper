@@ -1,0 +1,2 @@
+dataset,source_fmt,n_jobs,avg_rss_bytes,peak_rss_bytes
+TCGA_ATAC,bcf,8,4193733613,6220070912

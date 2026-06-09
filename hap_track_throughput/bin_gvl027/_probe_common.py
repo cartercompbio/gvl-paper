@@ -1,4 +1,4 @@
-"""Pure helpers shared by the GVL 0.26.0 parity-probe scripts.
+"""Pure helpers shared by the GVL 0.27.0 parity-probe scripts.
 
 No genvarloader / torch imports here so the math stays unit-testable under any env.
 """

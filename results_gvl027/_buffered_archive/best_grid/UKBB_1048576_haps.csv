@@ -1,0 +1,2 @@
+threads,batch_size,n_batches
+32,32,16

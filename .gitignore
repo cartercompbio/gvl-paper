@@ -9,6 +9,17 @@ throughput/configs/
 throughput/work/
 throughput/.bench_tmp/
 throughput/beds/
+hap_track_throughput/configs/
+hap_track_throughput/work/
+hap_track_throughput/.bench_tmp/
+hap_track_throughput/beds/
+
+# gvl027 bench scratch / datasets (not source)
+parity_ds/
+work_gvl061/
+.hwprobe/
+*.url
+marimo.*.out
 sbox.py
 sbox.ipynb
 .nextflow*

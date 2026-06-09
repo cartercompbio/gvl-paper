@@ -1,5 +1,5 @@
 #! /usr/bin/env python
-"""Timed GVL 0.26.0 dataloader throughput sweep for the parity probe.
+"""Timed GVL 0.27.0 dataloader throughput sweep for the parity probe.
 
 Sweeps a (threads, batch_size, n_batches) grid for one dataset + seqlen, in one
 output mode (haps|tracks) and one dataloader mode (none|buffered), and records
@@ -26,7 +26,7 @@ def bench(
     mode: str = "haps",          # "haps" or "tracks"
     dl_mode: str = "none",       # "none" or "buffered"
     dataset: str = "",
-    backend: str = "gvl026",
+    backend: str = "gvl027",
     buffer_bytes: int = 2 * 2 ** 30,
     burn_in: int = 1,
     replicates: int = 5,

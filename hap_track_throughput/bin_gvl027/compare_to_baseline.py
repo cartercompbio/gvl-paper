@@ -185,53 +185,134 @@ def main(
             ).select("dataset_norm", "mode", "seqlen", "batch_size", "start_gib", "peak_gib", "duration_s")
         )
 
-        # Single-batch size (GiB) per (mode, seqlen) at the memory operating point,
-        # from the throughput CSVs (total_bytes / n_batches_measured at the largest
-        # batch). Drawn as gray dashed lines so the curve's RSS can be read against
-        # the size of one batch — peak RSS sits far above it (accumulated, mostly
-        # file-backed mmap pages), and above the 96 GiB job request.
-        batch_gib: dict[tuple[str, int], float] = {}
-        for kind in ("haps", "tracks"):
-            td = _load_dir(results_dir, kind)
-            if td is None:
-                continue
-            td = td.with_columns(
+        # Per-(dataset, mode, seqlen) operating-point stats from the throughput
+        # CSVs, used to annotate the growth curves. Keyed by *dataset* (not shared
+        # across datasets) so each reference line matches its own curve's hue — a
+        # shared (mode, seqlen) line drew a 1kGP-sized batch over the much smaller
+        # TCGA curve, making TCGA's RSS look "smaller than one batch" when really
+        # the line belonged to a different dataset. We compute:
+        #   batch_gib     — bytes in one batch at the largest batch (the memory
+        #                   operating point) = total_bytes / n_batches_measured.
+        #   inst_streamed — instances actually decoded in the growth window
+        #                   (throughput * duration / bytes-per-instance). This is
+        #                   the key to the figure: a larger-seqlen panel can show
+        #                   *less* RSS growth simply because, in the fixed window,
+        #                   far fewer instances fault in from the mmap'd store.
+        tput_frames_m = [
+            f for f in (_load_dir(results_dir, k) for k in ("haps", "tracks")) if f is not None
+        ]
+        stats_d: dict[tuple[str, str, int], dict] = {}
+        if tput_frames_m:
+            tput_ok = pl.concat(tput_frames_m, how="vertical_relaxed").with_columns(
                 pl.col("throughput (MiB/s)").cast(pl.Float64, strict=False)
             ).filter(pl.col("throughput (MiB/s)") > 0)
-            if td.is_empty():
-                continue
-            td = (
-                td.with_columns(bb=pl.col("total_bytes") / pl.col("n_batches_measured"))
-                .sort("batch_size", descending=True)
-                .group_by("mode", "seqlen")
-                .agg(pl.col("bb").first())
-            )
-            for r in td.iter_rows(named=True):
-                batch_gib[(r["mode"], int(r["seqlen"]))] = r["bb"] / 2**30
+            if not tput_ok.is_empty():
+                # bytes/instance = max over the grid of (bytes/batch)/batch_size;
+                # partial (epoch-boundary) batches only undercount, so max is true.
+                bpi = (
+                    tput_ok.with_columns(
+                        bpi=pl.col("total_bytes")
+                        / pl.col("n_batches_measured")
+                        / pl.col("batch_size")
+                    )
+                    .group_by(["dataset_norm", "mode", "seqlen"])
+                    .agg(pl.col("bpi").max())
+                )
+                op = (
+                    tput_ok.sort("batch_size", descending=True)
+                    .group_by(["dataset_norm", "mode", "seqlen"])
+                    .agg(
+                        (pl.col("total_bytes") / pl.col("n_batches_measured"))
+                        .first()
+                        .alias("batch_bytes"),
+                        pl.col("throughput (MiB/s)")
+                        .filter(pl.col("batch_size") == pl.col("batch_size").max())
+                        .median()
+                        .alias("mib_s"),
+                    )
+                )
+                stats = (
+                    op.join(bpi, on=["dataset_norm", "mode", "seqlen"])
+                    .join(
+                        summary.select(["dataset_norm", "mode", "seqlen", "duration_s"]),
+                        on=["dataset_norm", "mode", "seqlen"],
+                        how="left",
+                    )
+                    .with_columns(
+                        batch_gib=pl.col("batch_bytes") / 2**30,
+                        inst_streamed=(pl.col("mib_s") * 2**20 * pl.col("duration_s"))
+                        / pl.col("bpi"),
+                    )
+                )
+                stats_d = {
+                    (r["dataset_norm"], r["mode"], int(r["seqlen"])): r
+                    for r in stats.iter_rows(named=True)
+                }
         JOB_MEM_GIB = 96.0  # BENCH_HAPS/TRACKS `memory 96.GB` request
 
+        # Per-curve decode rate (instances / s) so the x-axis can be normalized
+        # from wall-clock to *cumulative instances decoded* (dataset coverage).
+        # Coverage is the right normalizer here: the grid scales batch_size
+        # inversely with seqlen, so "number of batches" would mean wildly
+        # different coverage across panels, while instances-decoded is directly
+        # comparable. (True "epochs" would need each dataset's total instance
+        # count, which isn't recorded in any throughput/memory CSV.) Rate is
+        # taken as constant = inst_streamed / duration; throughput sawtooth makes
+        # this approximate, but it's representative of the steady-state decode.
+        rate_df = None
+        rate_rows = [
+            {
+                "dataset_norm": k[0], "mode": k[1], "seqlen": k[2],
+                "inst_rate": r["inst_streamed"] / r["duration_s"],
+            }
+            for k, r in stats_d.items()
+            if r.get("inst_streamed") is not None and r.get("duration_s")
+        ]
+        if rate_rows:
+            rate_df = pl.DataFrame(rate_rows)
+
         if mem.height:
-            mpdf = mem.with_columns(
+            mem_x = (
+                mem.join(rate_df, on=["dataset_norm", "mode", "seqlen"], how="left")
+                if rate_df is not None
+                else mem.with_columns(inst_rate=pl.lit(None, dtype=pl.Float64))
+            )
+            mpdf = mem_x.with_columns(
                 elapsed_s=pl.col("elapsed_ns") / 1e9,
                 rss_gib=pl.col("rss_bytes") / 2**30,
+                inst_decoded_m=(pl.col("elapsed_ns") / 1e9 * pl.col("inst_rate")) / 1e6,
             ).to_pandas()
+            # Fixed hue order + palette so reference lines can be colored to match
+            # their dataset's curve.
+            hue_order = sorted(mpdf["dataset_norm"].unique())
+            palette = dict(zip(hue_order, sns.color_palette(n_colors=len(hue_order))))
+            # x = instances decoded if we have rates for every curve, else fall
+            # back to wall-clock so the figure still renders.
+            x_col = "inst_decoded_m" if mpdf["inst_decoded_m"].notna().all() else "elapsed_s"
+            x_label = "instances decoded (M)" if x_col == "inst_decoded_m" else "elapsed (s)"
+            sns.set_context("notebook", font_scale=2.0)  # 2x larger fonts
             g = sns.relplot(
-                data=mpdf, x="elapsed_s", y="rss_gib", hue="dataset_norm", style="mode",
+                data=mpdf, x=x_col, y="rss_gib", hue="dataset_norm", style="mode",
+                hue_order=hue_order, palette=palette,
                 col="seqlen", col_wrap=2, kind="line", estimator=None,
+                linewidth=1,
                 facet_kws={"sharex": False, "sharey": False},
             )
-            g.set_axis_labels("elapsed time (s)", "RSS (GiB)")
-            for seqlen, ax in g.axes_dict.items():
-                for (mode, s), gib in batch_gib.items():
-                    if s != int(seqlen):
-                        continue
-                    ax.axhline(gib, c="0.5", ls="--", lw=1)
-                    ax.text(
-                        ax.get_xlim()[1], gib, f"1 {mode} batch ({gib:.0f} GiB)",
-                        c="0.4", fontsize=6, va="bottom", ha="right",
-                    )
-            g.savefig(fig_dir / "gvl027_mem_growth.png", dpi=150, bbox_inches="tight")
-            print(f"WROTE {fig_dir / 'gvl027_mem_growth.png'}")
+            g.set_axis_labels(x_label, "RSS (GiB)")
+            for ax in g.axes.flat:
+                # Only reference line kept: the 96 GiB job request. RSS climbs
+                # above it because the excess is reclaimable file-backed mmap page
+                # cache, not anonymous heap.
+                ax.axhline(JOB_MEM_GIB, c="r", ls=":", lw=2.5, alpha=0.8)
+                ax.text(
+                    ax.get_xlim()[0], JOB_MEM_GIB, "96 GiB --mem",
+                    c="r", fontsize=12, va="bottom", ha="left", alpha=0.9,
+                )
+            g.tight_layout()
+            for ext in ("png", "svg"):
+                out = fig_dir / f"gvl027_mem_growth.{ext}"
+                g.savefig(out, dpi=150, bbox_inches="tight")
+                print(f"WROTE {out}")
         else:
             print("No valid memory samples after drop_nulls — skipping memory plot.")
     else:
