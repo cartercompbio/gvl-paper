@@ -26,6 +26,8 @@ class StreamResult:
     duration_ns: int  # actual wall time of the timed loop
 
     def n_calls_per_sec(self) -> float:
+        if self.elapsed_ns == 0:
+            return 0.0
         return self.distinct_calls / (self.elapsed_ns * 1e-9)
 
 
