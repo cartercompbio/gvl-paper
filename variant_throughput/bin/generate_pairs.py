@@ -5,6 +5,8 @@ from pathlib import Path
 
 from cyclopts import run
 
+from _pairs import compute_batch_size
+
 
 def load_gap_intervals(
     contig_map: dict[str, str],
@@ -86,8 +88,8 @@ def bench(
     output: Path,
     seed: int = 0,
     n_replicates: int = 5,
-    max_pairs: int = 100,
-    max_total_length: int = 2**24,
+    stream_batches: int = 64,
+    bp_budget: int = 2**24,
 ):
     import polars as pl
     from genoray import SparseVar
@@ -119,33 +121,34 @@ def bench(
     available_samples = list(_svar.available_samples)
     rng = random.Random(seed)
 
+    batch_size = compute_batch_size(query_length, bp_budget)
+    n_pairs = stream_batches * batch_size
+
     replicates: list[int] = []
+    batch_ids: list[int] = []
     contigs: list[str] = []
     starts: list[int] = []
     ends: list[int] = []
     samples: list[str] = []
 
     for rep in range(n_replicates):
-        target = rng.randint(1, max_pairs)
-        total = 0
-        for _ in range(target):
-            if total + query_length > max_total_length:
-                break
+        for k in range(n_pairs):
             region = sample_region(allowed, query_length, rng)
             if region is None:
                 break
             contig, start, end = region
             sample = rng.choice(available_samples)
             replicates.append(rep)
+            batch_ids.append(k // batch_size)
             contigs.append(contig)
             starts.append(start)
             ends.append(end)
             samples.append(sample)
-            total += query_length
 
     pl.DataFrame(
         {
             "replicate": pl.Series(replicates, dtype=pl.UInt16),
+            "batch_id": pl.Series(batch_ids, dtype=pl.UInt32),
             "contig": contigs,
             "start": pl.Series(starts, dtype=pl.Int64),
             "end": pl.Series(ends, dtype=pl.Int64),
