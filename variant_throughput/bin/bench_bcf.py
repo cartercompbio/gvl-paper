@@ -19,7 +19,6 @@ def bench(
     min_seconds: float = 5.0,
     min_batches: int = 10,
 ):
-    import numpy as np
     import polars as pl
     from genoray import VCF
 
