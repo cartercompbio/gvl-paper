@@ -1,10 +1,12 @@
 #! /usr/bin/env python
 
 from pathlib import Path
-from time import perf_counter_ns
 from typing import Literal
 
 from cyclopts import run
+
+from _pairs import split_pair_batches
+from _streaming import drive_loop, prime, run_stream
 
 
 def bench(
@@ -14,6 +16,8 @@ def bench(
     dataset: str = "",
     mode: Literal["throughput", "memory"] = "throughput",
     n_samples: int = 0,
+    min_seconds: float = 5.0,
+    min_batches: int = 10,
 ):
     import numpy as np
     import polars as pl
@@ -24,53 +28,56 @@ def bench(
 
     rows_out: list[dict] = []
 
+    _bcf = VCF(bcf, with_gvi_index=False)
+
     for rep_val, group in df.group_by("replicate", maintain_order=True):
         rep = rep_val[0] if isinstance(rep_val, tuple) else rep_val
-        pairs = [
-            ((row["contig"], int(row["start"]), int(row["end"])), row["sample"])
-            for row in group.iter_rows(named=True)
-        ]
-        if not pairs:
+        batches = split_pair_batches(group)
+        if not batches:
             continue
+        n_pairs = sum(len(pairs) for pairs in batches)
 
-        if mode == "throughput":
-            _bcf = VCF(bcf, with_gvi_index=False)
-            t0 = perf_counter_ns()
-            n_calls = 0
+        def gather(pairs) -> int:
+            nonlocal _bcf
+            n = 0
             for (contig, start, end), sample in pairs:
                 _bcf = _bcf.set_samples(sample)
                 genos = _bcf.read(contig, start, end, mode=_bcf.Genos8)
-                n_calls += int((genos > 0).sum())
-            elapsed_ns = perf_counter_ns() - t0
+                n += int((genos > 0).sum())
+            return n
+
+        if mode == "throughput":
+            res = run_stream(
+                gather, batches, min_seconds=min_seconds, min_batches=min_batches
+            )
             rows_out.append({
                 "dataset": dataset or bcf.name,
                 "method": "bcf",
                 "query_length": q_len,
                 "n_samples": int(n_samples),
                 "replicate": int(rep),
-                "n_pairs": len(pairs),
-                "n_calls": n_calls,
-                "elapsed_ns": elapsed_ns,
+                "n_pairs": n_pairs,
+                "n_calls": res.distinct_calls,
+                "elapsed_ns": res.elapsed_ns,
                 "setup_ns": None,
             })
         else:
             from _mem_sampler import PeakRssSampler
 
-            _bcf = VCF(bcf, with_gvi_index=False)
-            n_calls = 0
+            distinct_calls = sum(gather(pairs) for pairs in batches)
+            prime(gather, batches)
             with PeakRssSampler() as s:
-                for (contig, start, end), sample in pairs:
-                    _bcf = _bcf.set_samples(sample)
-                    genos = _bcf.read(contig, start, end, mode=_bcf.Genos8)
-                    n_calls += int((genos > 0).sum())
+                drive_loop(
+                    gather, batches, min_seconds=min_seconds, min_batches=min_batches
+                )
             rows_out.append({
                 "dataset": dataset or bcf.name,
                 "method": "bcf",
                 "query_length": q_len,
                 "n_samples": int(n_samples),
                 "replicate": int(rep),
-                "n_pairs": len(pairs),
-                "n_calls": n_calls,
+                "n_pairs": n_pairs,
+                "n_calls": distinct_calls,
                 "peak_rss_bytes": s.peak,
             })
 
