@@ -11,7 +11,7 @@ params {
     fai: Path
     seed: Integer = 0
     n_replicates: Integer = 5
-    stream_batches: Integer = 64
+    stream_batches: Integer = 8
     bp_budget: Integer = 16777216
     min_seconds: Double = 5.0d
     min_batches: Integer = 10
@@ -437,9 +437,7 @@ process BENCH_BCF_THROUGHPUT {
       bcf_q${p.query_length}_n${p.n_samples}_throughput.csv \\
       --dataset ${params.dataset} \\
       --mode throughput \\
-      --n-samples ${p.n_samples} \\
-      --min-seconds ${params.min_seconds} \\
-      --min-batches ${params.min_batches}
+      --n-samples ${p.n_samples}
     """
 
     output:
@@ -464,9 +462,7 @@ process BENCH_BCF_MEMORY {
       bcf_q${p.query_length}_n${p.n_samples}_memory.csv \\
       --dataset ${params.dataset} \\
       --mode memory \\
-      --n-samples ${p.n_samples} \\
-      --min-seconds ${params.min_seconds} \\
-      --min-batches ${params.min_batches}
+      --n-samples ${p.n_samples}
     """
 
     output:
@@ -491,9 +487,7 @@ process BENCH_PGEN_THROUGHPUT {
       pgen_q${p.query_length}_n${p.n_samples}_throughput.csv \\
       --dataset ${params.dataset} \\
       --mode throughput \\
-      --n-samples ${p.n_samples} \\
-      --min-seconds ${params.min_seconds} \\
-      --min-batches ${params.min_batches}
+      --n-samples ${p.n_samples}
     """
 
     output:
@@ -518,9 +512,7 @@ process BENCH_PGEN_MEMORY {
       pgen_q${p.query_length}_n${p.n_samples}_memory.csv \\
       --dataset ${params.dataset} \\
       --mode memory \\
-      --n-samples ${p.n_samples} \\
-      --min-seconds ${params.min_seconds} \\
-      --min-batches ${params.min_batches}
+      --n-samples ${p.n_samples}
     """
 
     output:
@@ -545,9 +537,7 @@ process BENCH_PRESUBSET_BCF_THROUGHPUT {
       presubset_bcf_q${p.query_length}_n${p.n_samples}_throughput.csv \\
       --dataset ${params.dataset} \\
       --mode throughput \\
-      --n-samples ${p.n_samples} \\
-      --min-seconds ${params.min_seconds} \\
-      --min-batches ${params.min_batches}
+      --n-samples ${p.n_samples}
     """
 
     output:
@@ -572,9 +562,7 @@ process BENCH_PRESUBSET_BCF_MEMORY {
       presubset_bcf_q${p.query_length}_n${p.n_samples}_memory.csv \\
       --dataset ${params.dataset} \\
       --mode memory \\
-      --n-samples ${p.n_samples} \\
-      --min-seconds ${params.min_seconds} \\
-      --min-batches ${params.min_batches}
+      --n-samples ${p.n_samples}
     """
 
     output:
