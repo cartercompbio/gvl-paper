@@ -10,7 +10,6 @@ from typing import Literal
 from cyclopts import run
 
 from _pairs import split_pair_batches
-from _streaming import drive_loop, prime, run_stream
 
 
 def _subset_pairs(
@@ -72,8 +71,6 @@ def bench(
     dataset: str = "",
     mode: Literal["throughput", "memory"] = "throughput",
     n_samples: int = 0,
-    min_seconds: float = 5.0,
-    min_batches: int = 10,
 ):
     import polars as pl
 
@@ -103,9 +100,9 @@ def bench(
             setup_ns = perf_counter_ns() - t0
 
             if mode == "throughput":
-                res = run_stream(
-                    gather, batch_tmp, min_seconds=min_seconds, min_batches=min_batches
-                )
+                t0 = perf_counter_ns()
+                n_calls = sum(gather(tp) for tp in batch_tmp)
+                elapsed_ns = perf_counter_ns() - t0
                 rows_out.append({
                     "dataset": dataset or bcf.name,
                     "method": "presubset_bcf",
@@ -113,19 +110,15 @@ def bench(
                     "n_samples": int(n_samples),
                     "replicate": int(rep),
                     "n_pairs": n_pairs,
-                    "n_calls": res.distinct_calls,
-                    "elapsed_ns": res.elapsed_ns,
+                    "n_calls": n_calls,
+                    "elapsed_ns": elapsed_ns,
                     "setup_ns": setup_ns,
                 })
             else:
                 from _mem_sampler import PeakRssSampler
 
-                distinct_calls = sum(gather(tp) for tp in batch_tmp)
-                prime(gather, batch_tmp)
                 with PeakRssSampler() as s:
-                    drive_loop(
-                        gather, batch_tmp, min_seconds=min_seconds, min_batches=min_batches
-                    )
+                    n_calls = sum(gather(tp) for tp in batch_tmp)
                 rows_out.append({
                     "dataset": dataset or bcf.name,
                     "method": "presubset_bcf",
@@ -133,7 +126,7 @@ def bench(
                     "n_samples": int(n_samples),
                     "replicate": int(rep),
                     "n_pairs": n_pairs,
-                    "n_calls": distinct_calls,
+                    "n_calls": n_calls,
                     "peak_rss_bytes": s.peak,
                 })
         finally:
