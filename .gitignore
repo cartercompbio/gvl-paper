@@ -191,3 +191,15 @@ cython_debug/
 # pixi environments
 .pixi
 *.egg-info
+
+# Claude Code local state
+.claude/
+# nextflow scratch temp files
+nxf-tmp.*
+# recovery run logs (tqdm spam)
+variant_throughput/results_recover/*.log
+
+# Private manuscript drafts — must NOT be committed (public repo)
+/manuscript.md
+/rebuttal.md
+/supplement.md

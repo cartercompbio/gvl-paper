@@ -16,11 +16,17 @@ def bench(
     dataset: str = "",
     mode: Literal["throughput", "memory"] = "throughput",
     n_samples: int = 0,
+    max_pairs_per_rep: int = 0,
 ):
     import polars as pl
     from genoray import PGEN
 
     df = pl.read_parquet(pairs_parquet)
+    # Peak RSS is invariant to query count (dominated by the fixed pgen open/index
+    # cost), so memory runs can subsample to avoid pathological wall-times on the
+    # smallest query lengths (largest batches). 0 = use all pairs.
+    if max_pairs_per_rep > 0:
+        df = df.group_by("replicate", maintain_order=True).head(max_pairs_per_rep)
     q_len = int(df["end"][0] - df["start"][0])
 
     rows_out: list[dict] = []

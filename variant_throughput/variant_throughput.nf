@@ -505,15 +505,38 @@ process BENCH_PGEN_MEMORY {
     p: SweepInput
 
     script:
-    """
-    bench_pgen.py \\
-      ${p.pairs} \\
-      ${p.pgen} \\
-      pgen_q${p.query_length}_n${p.n_samples}_memory.csv \\
-      --dataset ${params.dataset} \\
-      --mode memory \\
-      --n-samples ${p.n_samples}
-    """
+    // q=2048 yields the largest batch (65536 pairs/rep). pgen reads run ~3/s, so
+    // that one memory cell takes ~29h and overruns the 1d limit. pgen peak RSS is
+    // dominated by the fixed ~20GB .gvi index load and plateaus (~24GB) regardless
+    // of query count -- verified empirically: 512 vs 4096 pairs/rep both ~21-24GB,
+    // AveRSS~MaxRSS -- so capping this cell does not bias its measurement.
+    // NOTE: this cap is pgen-specific. Do NOT add it to BENCH_SVAR_MEMORY: SparseVar
+    // is a memmap format, so its RSS = resident .svar pages and *legitimately* scales
+    // with query count (10GB@1024 pairs -> 91GB@65536) -- that scaling is the real
+    // behavior the memory benchmark measures. bcf/presubset stream at <1GB and finish
+    // at full pairs, so they need no cap either. Other cells keep the original command
+    // verbatim to preserve the resume cache.
+    if( p.query_length <= 2048 )
+        """
+        bench_pgen.py \\
+          ${p.pairs} \\
+          ${p.pgen} \\
+          pgen_q${p.query_length}_n${p.n_samples}_memory.csv \\
+          --dataset ${params.dataset} \\
+          --mode memory \\
+          --n-samples ${p.n_samples} \\
+          --max-pairs-per-rep 512
+        """
+    else
+        """
+        bench_pgen.py \\
+          ${p.pairs} \\
+          ${p.pgen} \\
+          pgen_q${p.query_length}_n${p.n_samples}_memory.csv \\
+          --dataset ${params.dataset} \\
+          --mode memory \\
+          --n-samples ${p.n_samples}
+        """
 
     output:
     record(method: "pgen", csv: file("pgen_q${p.query_length}_n${p.n_samples}_memory.csv"))
