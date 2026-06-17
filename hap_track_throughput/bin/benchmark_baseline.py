@@ -51,3 +51,146 @@ def select_cells(grid_file: Path, *, threads: int) -> list[tuple[int, int]]:
         .sort("batch_size")
     )
     return [(int(b), int(n)) for b, n in rows.iter_rows()]
+
+
+def _make_ref_dataset(fasta: Path, bed: Path, n_samples: int):
+    import numpy as np
+    import polars as pl
+    import pysam
+    from torch.utils.data import Dataset
+
+    class Ref(Dataset):
+        def __init__(self, path, bed, n_samples):
+            self.path = path
+            self.fasta = None
+            self.bed = pl.read_csv(
+                bed, separator="\t", has_header=False,
+                new_columns=["contig", "start", "end"],
+                schema_overrides={"contig": pl.Utf8},
+            )
+            self.n_samples = n_samples
+            bed_ucsc = self.bed["contig"].str.contains("chr").any()
+            with pysam.FastaFile(str(self.path)) as f:
+                fa_ucsc = any(c.startswith("chr") for c in f.references)
+            if not bed_ucsc and fa_ucsc:
+                self.bed = self.bed.with_columns("chr" + pl.col("contig"))
+            elif bed_ucsc and not fa_ucsc:
+                self.bed = self.bed.with_columns(pl.col("contig").str.slice(3))
+
+        @property
+        def shape(self):
+            return (self.bed.height, self.n_samples)
+
+        def __len__(self):
+            return self.bed.height * self.n_samples
+
+        def __getitem__(self, index):
+            if self.fasta is None:
+                self.fasta = pysam.FastaFile(str(self.path))
+            region, _sample = map(int, np.unravel_index(index, self.shape))
+            contig, start, end = self.bed.row(region)
+            seq = np.frombuffer(
+                self.fasta.fetch(contig, start, end).encode("ascii").upper(), dtype="S1"
+            )
+            return seq.view("u1").astype(np.uint8, copy=True)
+
+    return Ref(fasta, bed, n_samples)
+
+
+def _measure_and_write(
+    f, *, ds, dataset, backend, threads, seqlen, batch_size, n_batches,
+    num_workers, burn_in, replicates, time_limit_ns, min_batches,
+):
+    from torch.utils.data import DataLoader
+    from _bench_common import measure_cell, mib_per_s
+
+    for _ in range(replicates):
+        dl = DataLoader(ds, batch_size=batch_size, num_workers=num_workers)
+        res = measure_cell(
+            dl, burn_in=burn_in, n_batches=n_batches,
+            time_limit_ns=time_limit_ns, min_batches=min_batches,
+        )
+        prefix = f"{dataset},{backend},none,{threads},{seqlen},{batch_size}"
+        if res is None:
+            f.write(f"{prefix},0,0,0,nan\n")
+        else:
+            tput = mib_per_s(res.total_bytes, res.duration_ns / 1e9) if res.duration_ns > 0 else float("nan")
+            f.write(f"{prefix},{res.n_measured},{res.total_bytes},{res.duration_ns},{tput}\n")
+        f.flush()
+
+
+def run_kind(
+    *, kind, threads, fasta, bigwig_table, bed_dir, grid_dir, seqlens,
+    results, n_samples, mem_cap_bytes, burn_in, replicates, time_limit_s, min_batches,
+):
+    from _bench_common import THROUGHPUT_HEADER
+
+    bytes_per_bp = 1 if kind == "fasta" else 4
+    backend = "fasta" if kind == "fasta" else "pybigwig"
+    dataset = "FASTA" if kind == "fasta" else "TCGA_ATAC"
+    num_workers = max(0, threads - 1)
+    prefetch_factor = 2
+    time_limit_ns = int(time_limit_s * 1e9)
+
+    results.parent.mkdir(parents=True, exist_ok=True)
+    write_header = not results.exists()
+    with open(results, "a") as f:
+        if write_header:
+            f.write(THROUGHPUT_HEADER)
+            f.flush()
+        for seqlen in seqlens:
+            grid_file = Path(grid_dir) / f"grid_{seqlen}.csv"
+            bed = Path(bed_dir) / f"tile_{seqlen}.bed"
+            for batch_size, n_batches in select_cells(grid_file, threads=threads):
+                if not cell_fits(
+                    batch_size=batch_size, seqlen=seqlen, bytes_per_bp=bytes_per_bp,
+                    num_workers=num_workers, prefetch_factor=prefetch_factor,
+                    mem_cap_bytes=mem_cap_bytes,
+                ):
+                    f.write(f"{dataset},{backend},none,{threads},{seqlen},{batch_size},0,0,0,nan\n")
+                    f.flush()
+                    continue
+                if kind == "fasta":
+                    ds = _make_ref_dataset(fasta, bed, n_samples)
+                else:
+                    ds = _make_bigwig_dataset(bigwig_table, bed)
+                _measure_and_write(
+                    f, ds=ds, dataset=dataset, backend=backend, threads=threads,
+                    seqlen=seqlen, batch_size=batch_size, n_batches=n_batches,
+                    num_workers=num_workers, burn_in=burn_in, replicates=replicates,
+                    time_limit_ns=time_limit_ns, min_batches=min_batches,
+                )
+
+
+def main(
+    kind: str,
+    threads: int,
+    results: Path,
+    *,
+    fasta: Path = Path("/carter/users/dlaub/data/1kGP/GRCh38_full_analysis_set_plus_decoy_hla.fa"),
+    bigwig_table: Path = Path("/carter/shared/data/ml4gland/tcga-atac/data/sample_to_bigwig.csv"),
+    bed_dir: Path = Path(__file__).parent / "beds",
+    grid_dir: Path = Path(__file__).parent / "beds",
+    n_samples: int = 62,
+    mem_cap_gib: float = 96.0,
+    burn_in: int = 1,
+    replicates: int = 3,
+    time_limit_s: float = 45.0,
+    min_batches: int = 5,
+):
+    """Measure one baseline kind at one thread count. Threads are limited by the
+    caller via taskset; this just reports `threads` and sets num_workers=threads-1."""
+    if kind not in ("fasta", "pybigwig"):
+        raise ValueError(f"kind must be 'fasta' or 'pybigwig', got {kind!r}")
+    seqlens = [2048, 16384, 131072, 1048576]
+    run_kind(
+        kind=kind, threads=threads, fasta=fasta,
+        bigwig_table=bigwig_table if kind == "pybigwig" else None,
+        bed_dir=bed_dir, grid_dir=grid_dir, seqlens=seqlens, results=results,
+        n_samples=n_samples, mem_cap_bytes=int(mem_cap_gib * 2**30),
+        burn_in=burn_in, replicates=replicates, time_limit_s=time_limit_s, min_batches=min_batches,
+    )
+
+
+if __name__ == "__main__":
+    run(main)

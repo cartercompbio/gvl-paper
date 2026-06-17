@@ -47,3 +47,51 @@ def test_select_cells_filters_threads_and_dedups_batches(tmp_path):
     cells = select_cells(p, threads=4)
     # only threads==4 rows, as (batch_size, n_batches) tuples
     assert cells == [(2, 256), (32, 16)]
+
+
+def _write_tiny_fasta(tmp_path) -> Path:
+    import subprocess
+    fa = tmp_path / "tiny.fa"
+    # one contig "chr1", 10 kb of ACGT so 2048-bp reads have room
+    seq = ("ACGT" * 2560)[:10_000]
+    fa.write_text(">chr1\n" + "\n".join(seq[i:i+60] for i in range(0, len(seq), 60)) + "\n")
+    try:
+        subprocess.run(["samtools", "faidx", str(fa)], check=True)
+    except (FileNotFoundError, subprocess.CalledProcessError):
+        import pysam
+        pysam.faidx(str(fa))
+    return fa
+
+
+def _write_bed(tmp_path, length, n_regions) -> Path:
+    bed = tmp_path / f"tile_{length}.bed"
+    lines = [f"chr1\t{i*length}\t{(i+1)*length}" for i in range(n_regions)]
+    bed.write_text("\n".join(lines) + "\n")
+    return bed
+
+
+def test_fasta_driver_writes_comparable_schema(tmp_path):
+    import polars as pl
+    from benchmark_baseline import run_kind
+
+    fa = _write_tiny_fasta(tmp_path)
+    beds = {2048: _write_bed(tmp_path, 2048, 4)}
+    grid = tmp_path / "grid_2048.csv"
+    pl.DataFrame({"threads": [1], "batch_size": [2], "n_batches": [3]}).write_csv(grid)
+    out = tmp_path / "fasta.csv"
+
+    run_kind(
+        kind="fasta", threads=1, fasta=fa, bigwig_table=None,
+        bed_dir=tmp_path, grid_dir=tmp_path, seqlens=[2048],
+        results=out, n_samples=4, mem_cap_bytes=96 * 2**30,
+        burn_in=1, replicates=1, time_limit_s=5.0, min_batches=1,
+    )
+
+    df = pl.read_csv(out)
+    assert df.columns == [
+        "dataset", "backend", "dl_mode", "threads", "seqlen", "batch_size",
+        "n_batches_measured", "total_bytes", "duration_ns", "throughput (MiB/s)",
+    ]
+    assert (df["backend"] == "fasta").all()
+    assert (df["dl_mode"] == "none").all()
+    assert df["throughput (MiB/s)"].drop_nulls().gt(0).all()
