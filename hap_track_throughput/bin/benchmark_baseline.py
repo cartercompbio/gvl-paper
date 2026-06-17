@@ -99,13 +99,16 @@ def _make_ref_dataset(fasta: Path, bed: Path, n_samples: int):
 
 def _measure_and_write(
     f, *, ds, dataset, backend, threads, seqlen, batch_size, n_batches,
-    num_workers, burn_in, replicates, time_limit_ns, min_batches,
+    num_workers, prefetch_factor, burn_in, replicates, time_limit_ns, min_batches,
 ):
     from torch.utils.data import DataLoader
     from _bench_common import measure_cell, mib_per_s
 
     for _ in range(replicates):
-        dl = DataLoader(ds, batch_size=batch_size, num_workers=num_workers)
+        dl_kwargs = dict(batch_size=batch_size, num_workers=num_workers)
+        if num_workers > 0:
+            dl_kwargs["prefetch_factor"] = prefetch_factor
+        dl = DataLoader(ds, **dl_kwargs)
         res = measure_cell(
             dl, burn_in=burn_in, n_batches=n_batches,
             time_limit_ns=time_limit_ns, min_batches=min_batches,
@@ -157,7 +160,8 @@ def run_kind(
                 _measure_and_write(
                     f, ds=ds, dataset=dataset, backend=backend, threads=threads,
                     seqlen=seqlen, batch_size=batch_size, n_batches=n_batches,
-                    num_workers=num_workers, burn_in=burn_in, replicates=replicates,
+                    num_workers=num_workers, prefetch_factor=prefetch_factor,
+                    burn_in=burn_in, replicates=replicates,
                     time_limit_ns=time_limit_ns, min_batches=min_batches,
                 )
 
