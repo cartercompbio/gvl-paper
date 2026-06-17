@@ -199,7 +199,5 @@ nxf-tmp.*
 # recovery run logs (tqdm spam)
 variant_throughput/results_recover/*.log
 
-# Private manuscript drafts — must NOT be committed (public repo)
-/manuscript.md
-/rebuttal.md
-/supplement.md
+# Private drafts
+text/*
