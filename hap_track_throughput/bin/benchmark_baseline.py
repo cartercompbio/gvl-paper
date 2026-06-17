@@ -89,10 +89,17 @@ def _make_ref_dataset(fasta: Path, bed: Path, n_samples: int):
                 self.fasta = pysam.FastaFile(str(self.path))
             region, _sample = map(int, np.unravel_index(index, self.shape))
             contig, start, end = self.bed.row(region)
-            seq = np.frombuffer(
-                self.fasta.fetch(contig, start, end).encode("ascii").upper(), dtype="S1"
-            )
-            return seq.view("u1").astype(np.uint8, copy=True)
+            seqlen = end - start
+            raw = self.fasta.fetch(contig, start, end).encode("ascii").upper()
+            seq = np.frombuffer(raw, dtype="S1").view("u1").astype(np.uint8, copy=True)
+            if len(seq) < seqlen:
+                # Pad to expected length (chromosome boundary truncation — 25 tiles
+                # in GRCh38 tile_2048.bed have end > chrom_len; pysam clips them).
+                # Fill with 0 (same convention as GVL's N-masking).
+                out = np.zeros(seqlen, dtype=np.uint8)
+                out[: len(seq)] = seq
+                return out
+            return seq
 
     return Ref(fasta, bed, n_samples)
 
