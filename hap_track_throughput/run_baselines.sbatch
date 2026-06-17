@@ -14,6 +14,15 @@
 # FASTA then pyBigWig, SEQUENTIALLY — two throughput benchmarks on one node would
 # contend for DRAM bandwidth and corrupt each other's numbers. Thread counts are
 # limited per-cell with taskset so each cell uses exactly T cores (num_workers=T-1).
+#
+# Dry-run timing (cn-03, job 11611503, 2026-06-17):
+#   kind=fasta, threads=1, 4 seqlens, time_limit_s=10, replicates=1, burn_in=1
+#   → 17m 28s wall, 38 cells, avg 27.6s/cell, peak RSS 27 GiB.
+#   Full-run (time_limit_s=45, replicates=3) upper-bound estimate:
+#     fasta: 138 cells; pybigwig: 124 cells; total 262 cells.
+#     Upper-bound avg = 27.6s × (45/10) × 3 = 373s/cell × 262 = 97,826s (~27h).
+#     Realistic (mix of fast/slow cells; higher T faster; pybigwig shallower BED):
+#     ~5-6h. Fits under 8h limit comfortably. No mitigation needed.
 set -euo pipefail
 export PATH="/cellar/users/dlaub/.pixi/bin:$PATH"
 ROOT=/carter/users/dlaub/projects/gvl-paper
