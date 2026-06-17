@@ -122,6 +122,38 @@ def _measure_and_write(
         f.flush()
 
 
+def _make_bigwig_dataset(bigwig_table, bed: Path):
+    import genvarloader as gvl
+    import numpy as np
+    import polars as pl
+    from torch.utils.data import Dataset
+
+    class BigWigDataset(Dataset):
+        def __init__(self, bigwigs, bed):
+            self.bigwigs = bigwigs
+            self.bed = pl.read_csv(
+                bed, separator="\t", has_header=False,
+                new_columns=["contig", "start", "end"],
+                schema_overrides={"contig": pl.Utf8},
+            )
+            self.n_samples = len(self.bigwigs.samples)
+
+        @property
+        def shape(self):
+            return (self.bed.height, self.n_samples)
+
+        def __len__(self):
+            return self.bed.height * self.n_samples
+
+        def __getitem__(self, index):
+            region, sample = map(int, np.unravel_index(index, self.shape))
+            contig, start, end = self.bed.row(region)
+            return self.bigwigs.read(contig, start, end, sample=self.bigwigs.samples[sample])
+
+    bigwigs = gvl.BigWigs.from_table("bw", bigwig_table)
+    return BigWigDataset(bigwigs, bed)
+
+
 def run_kind(
     *, kind, threads, fasta, bigwig_table, bed_dir, grid_dir, seqlens,
     results, n_samples, mem_cap_bytes, burn_in, replicates, time_limit_s, min_batches,

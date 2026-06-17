@@ -95,3 +95,33 @@ def test_fasta_driver_writes_comparable_schema(tmp_path):
     assert (df["backend"] == "fasta").all()
     assert (df["dl_mode"] == "none").all()
     assert df["throughput (MiB/s)"].drop_nulls().gt(0).all()
+
+
+def test_bigwig_driver_writes_comparable_schema(tmp_path):
+    import numpy as np
+    import polars as pl
+    import pyBigWig
+    from benchmark_baseline import run_kind
+
+    # one tiny bigwig + a sample_to_bigwig table
+    bw_path = tmp_path / "s1.bw"
+    bw = pyBigWig.open(str(bw_path), "w")
+    bw.addHeader([("chr1", 10_000)])
+    bw.addEntries("chr1", 0, values=np.ones(10_000, dtype=np.float32), span=1, step=1)
+    bw.close()
+    table = tmp_path / "table.csv"
+    pl.DataFrame({"sample": ["s1"], "path": [str(bw_path)]}).write_csv(table)
+
+    beds = _write_bed(tmp_path, 2048, 4)  # noqa: F841 (writes tile_2048.bed)
+    pl.DataFrame({"threads": [1], "batch_size": [2], "n_batches": [3]}).write_csv(tmp_path / "grid_2048.csv")
+    out = tmp_path / "pybigwig.csv"
+
+    run_kind(
+        kind="pybigwig", threads=1, fasta=None, bigwig_table=table,
+        bed_dir=tmp_path, grid_dir=tmp_path, seqlens=[2048],
+        results=out, n_samples=1, mem_cap_bytes=96 * 2**30,
+        burn_in=1, replicates=1, time_limit_s=5.0, min_batches=1,
+    )
+    df = pl.read_csv(out)
+    assert (df["backend"] == "pybigwig").all()
+    assert df["throughput (MiB/s)"].drop_nulls().gt(0).all()
