@@ -3,17 +3,20 @@
 #SBATCH --partition=carter-compute
 #SBATCH --account=carter
 #SBATCH --nodelist=carter-cn-03
-#SBATCH --exclusive
+#SBATCH --cpus-per-task=32
 #SBATCH --mem=96G
 #SBATCH --time=08:00:00
 #SBATCH --output=/carter/users/dlaub/projects/gvl-paper/results_gvl027/baselines_%j.log
 #SBATCH --error=/carter/users/dlaub/projects/gvl-paper/results_gvl027/baselines_%j.log
 #
 # Re-measure FASTA + pyBigWig baselines apples-to-apples with the GVL 0.27 grid.
-# Pinned to cn-03 (same node as the 0.27 grid; cn-02 is bandwidth-starved).
-# FASTA then pyBigWig, SEQUENTIALLY — two throughput benchmarks on one node would
-# contend for DRAM bandwidth and corrupt each other's numbers. Thread counts are
-# limited per-cell with taskset so each cell uses exactly T cores (num_workers=T-1).
+# Scheduling MATCHES how the 0.27 GVL numbers were collected (benchmark.nf:205,243):
+# --nodelist=carter-cn-03 --cpus-per-task=32 --mem=96G, NON-exclusive (shared node,
+# same co-tenant contention regime as GVL; cn-02 is bandwidth-starved so cn-03 only).
+# FASTA then pyBigWig, SEQUENTIALLY. Thread counts are swept by num_workers=T-1 (one
+# invocation per T) — count-based parallelism like GVL's nb.set_num_threads(T); NOT
+# taskset core-pinning (fragile under a shared cgroup that hands out non-contiguous
+# core IDs, and not how GVL swept threads).
 #
 # Dry-run timing (cn-03, job 11611503, 2026-06-17):
 #   kind=fasta, threads=1, 4 seqlens, time_limit_s=10, replicates=1, burn_in=1
@@ -51,8 +54,8 @@ for KIND in fasta pybigwig; do
   rm -f "$RES"   # fresh; the script appends across thread counts
   for T in "${THREADS[@]}"; do
     echo "=== $KIND threads=$T $(date) ==="
-    taskset -c 0-$((T-1)) pixi run -e bench027 python bin/benchmark_baseline.py \
-      "$KIND" "$T" "$RES"
+    # threads swept via num_workers=T-1 (count-based, like GVL); no taskset core-pin.
+    pixi run -e bench027 python bin/benchmark_baseline.py "$KIND" "$T" "$RES"
   done
 done
 echo "=== DONE $(date) ==="

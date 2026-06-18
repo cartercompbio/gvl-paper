@@ -4,9 +4,12 @@
 Reuses the pysam `Ref` and `gvl.BigWigs` dataset readers but drives them through
 `_bench_common.measure_cell` so throughput (MiB/s) is directly comparable to the
 GVL numbers in results_gvl027/{haps,tracks}/*_none.csv. Thread counts are swept
-by the caller via taskset (one invocation per thread count); num_workers is the
+by num_workers (one invocation per thread count): num_workers = threads - 1, the
 allocated CPU count minus one (the main process), matching a fully-optimized
-PyTorch multiprocessing DataLoader (reviewer R2-min1).
+PyTorch multiprocessing DataLoader (reviewer R2-min1). This is count-based
+parallelism like GVL's nb.set_num_threads(T) — the run is a shared cn-03,
+cpus-per-task=32 allocation (matching benchmark_haps.py's scheduling), so no
+taskset core-pinning is used.
 """
 
 from pathlib import Path
@@ -259,8 +262,9 @@ def main(
     min_batches: int = 5,
     drop_cache: bool = True,
 ):
-    """Measure one baseline kind at one thread count. Threads are limited by the
-    caller via taskset; this just reports `threads` and sets num_workers=threads-1.
+    """Measure one baseline kind at one thread count. `threads` sets the data-loading
+    parallelism: num_workers = threads - 1 (count-based, like GVL's set_num_threads;
+    no taskset core-pinning). The value is reported verbatim in the `threads` column.
 
     drop_cache (FASTA only): evict each haplotype file's pages via posix_fadvise
     DONTNEED after every read, forcing cold storage reads. Default on — real
