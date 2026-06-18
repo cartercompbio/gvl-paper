@@ -53,22 +53,27 @@ def select_cells(grid_file: Path, *, threads: int) -> list[tuple[int, int]]:
     return [(int(b), int(n)) for b, n in rows.iter_rows()]
 
 
-def _make_ref_dataset(fasta: Path, bed: Path, n_samples: int):
+def _make_ref_dataset(fasta: Path, fasta2: Path, bed: Path, n_samples: int):
     import numpy as np
     import polars as pl
     import pysam
     from torch.utils.data import Dataset
 
     class Ref(Dataset):
-        def __init__(self, path, bed, n_samples):
+        def __init__(self, path, path2, bed, n_samples):
             self.path = path
+            self.path2 = path2
+            # fasta and fasta2 handles opened lazily in __getitem__ (worker-fork-safe)
             self.fasta = None
+            self.fasta2 = None
             self.bed = pl.read_csv(
                 bed, separator="\t", has_header=False,
                 new_columns=["contig", "start", "end"],
                 schema_overrides={"contig": pl.Utf8},
             )
             self.n_samples = n_samples
+            # Contig/UCSC reconciliation based on fasta (hap1).
+            # fasta2 is a byte-identical duplicate so it has the same contig names.
             bed_ucsc = self.bed["contig"].str.contains("chr").any()
             with pysam.FastaFile(str(self.path)) as f:
                 fa_ucsc = any(c.startswith("chr") for c in f.references)
@@ -84,13 +89,10 @@ def _make_ref_dataset(fasta: Path, bed: Path, n_samples: int):
         def __len__(self):
             return self.bed.height * self.n_samples
 
-        def __getitem__(self, index):
-            if self.fasta is None:
-                self.fasta = pysam.FastaFile(str(self.path))
-            region, _sample = map(int, np.unravel_index(index, self.shape))
-            contig, start, end = self.bed.row(region)
+        def _read_padded(self, handle, contig, start, end):
+            """Fetch [start, end) from handle and zero-pad to seqlen if pysam clips."""
             seqlen = end - start
-            raw = self.fasta.fetch(contig, start, end).encode("ascii").upper()
+            raw = handle.fetch(contig, start, end).encode("ascii").upper()
             seq = np.frombuffer(raw, dtype="S1").view("u1").astype(np.uint8, copy=True)
             if len(seq) < seqlen:
                 # Pad to expected length (chromosome boundary truncation — 25 tiles
@@ -101,7 +103,19 @@ def _make_ref_dataset(fasta: Path, bed: Path, n_samples: int):
                 return out
             return seq
 
-    return Ref(fasta, bed, n_samples)
+        def __getitem__(self, index):
+            if self.fasta is None:
+                self.fasta = pysam.FastaFile(str(self.path))
+            if self.fasta2 is None:
+                self.fasta2 = pysam.FastaFile(str(self.path2))
+            region, _sample = map(int, np.unravel_index(index, self.shape))
+            contig, start, end = self.bed.row(region)
+            h1 = self._read_padded(self.fasta, contig, start, end)
+            h2 = self._read_padded(self.fasta2, contig, start, end)
+            # Stack to (2, seqlen) matching GVL's diploid (2, seqlen) uint8 output.
+            return np.stack([h1, h2])
+
+    return Ref(fasta, fasta2, bed, n_samples)
 
 
 def _measure_and_write(
@@ -162,12 +176,13 @@ def _make_bigwig_dataset(bigwig_table, bed: Path):
 
 
 def run_kind(
-    *, kind, threads, fasta, bigwig_table, bed_dir, grid_dir, seqlens,
+    *, kind, threads, fasta, fasta2=None, bigwig_table, bed_dir, grid_dir, seqlens,
     results, n_samples, mem_cap_bytes, burn_in, replicates, time_limit_s, min_batches,
 ):
     from _bench_common import THROUGHPUT_HEADER
 
-    bytes_per_bp = 1 if kind == "fasta" else 4
+    # fasta items are diploid (2, seqlen) uint8 = 2 bytes/bp, matching GVL haps output.
+    bytes_per_bp = 2 if kind == "fasta" else 4
     backend = "fasta" if kind == "fasta" else "pybigwig"
     dataset = "FASTA" if kind == "fasta" else "TCGA_ATAC"
     num_workers = max(0, threads - 1)
@@ -193,7 +208,7 @@ def run_kind(
                     f.flush()
                     continue
                 if kind == "fasta":
-                    ds = _make_ref_dataset(fasta, bed, n_samples)
+                    ds = _make_ref_dataset(fasta, fasta2, bed, n_samples)
                 else:
                     ds = _make_bigwig_dataset(bigwig_table, bed)
                 _measure_and_write(
@@ -211,6 +226,7 @@ def main(
     results: Path,
     *,
     fasta: Path = Path("/carter/users/dlaub/data/1kGP/GRCh38_full_analysis_set_plus_decoy_hla.fa"),
+    fasta2: Path = Path("/carter/users/dlaub/data/1kGP/GRCh38_full_analysis_set_plus_decoy_hla.hap2.fa"),
     bigwig_table: Path = Path("/carter/shared/data/ml4gland/tcga-atac/data/sample_to_bigwig.csv"),
     bed_dir: Path = Path(__file__).parent / "beds",
     grid_dir: Path = Path(__file__).parent / "beds",
@@ -227,7 +243,7 @@ def main(
         raise ValueError(f"kind must be 'fasta' or 'pybigwig', got {kind!r}")
     seqlens = [2048, 16384, 131072, 1048576]
     run_kind(
-        kind=kind, threads=threads, fasta=fasta,
+        kind=kind, threads=threads, fasta=fasta, fasta2=fasta2,
         bigwig_table=bigwig_table if kind == "pybigwig" else None,
         bed_dir=bed_dir, grid_dir=grid_dir, seqlens=seqlens, results=results,
         n_samples=n_samples, mem_cap_bytes=int(mem_cap_gib * 2**30),

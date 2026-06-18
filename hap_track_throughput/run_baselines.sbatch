@@ -23,10 +23,21 @@
 #     Upper-bound avg = 27.6s × (45/10) × 3 = 373s/cell × 262 = 97,826s (~27h).
 #     Realistic (mix of fast/slow cells; higher T faster; pybigwig shallower BED):
 #     ~5-6h. Fits under 8h limit comfortably. No mitigation needed.
+# Note: fasta baseline is now 2 bytes/bp (diploid — reads two haplotype FASTA files
+# per item), so fewer large-batch fasta cells fit within the 96 GiB RAM cap.
 set -euo pipefail
 export PATH="/cellar/users/dlaub/.pixi/bin:$PATH"
 ROOT=/carter/users/dlaub/projects/gvl-paper
 cd "$ROOT/hap_track_throughput"
+
+# Provision the hap2 duplicate FASTA (distinct inode defeats OS page-cache reuse).
+FASTA=/carter/users/dlaub/data/1kGP/GRCh38_full_analysis_set_plus_decoy_hla.fa
+HAP2=/carter/users/dlaub/data/1kGP/GRCh38_full_analysis_set_plus_decoy_hla.hap2.fa
+if [ ! -s "$HAP2" ]; then
+  echo "Creating hap2 duplicate FASTA (distinct inode to defeat page-cache reuse)..."
+  cp "$FASTA" "$HAP2"
+  pixi run -e bench027 python -c "import pysam; pysam.faidx('$HAP2')"
+fi
 
 OUT="$ROOT/results_gvl027/baselines"
 mkdir -p "$OUT"
