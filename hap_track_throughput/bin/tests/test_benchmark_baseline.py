@@ -125,3 +125,23 @@ def test_bigwig_driver_writes_comparable_schema(tmp_path):
     df = pl.read_csv(out)
     assert (df["backend"] == "pybigwig").all()
     assert df["throughput (MiB/s)"].drop_nulls().gt(0).all()
+
+
+def test_fasta_pads_chromosome_boundary_tile(tmp_path):
+    """pysam clips tiles that overhang chromosome ends; __getitem__ must zero-pad to seqlen."""
+    import numpy as np
+    import pysam
+    from benchmark_baseline import _make_ref_dataset
+
+    fa = tmp_path / "short.fa"
+    fa.write_text(">chr1\n" + "A" * 1500 + "\n")
+    pysam.faidx(str(fa))
+    bed = tmp_path / "tile_2048.bed"
+    bed.write_text("chr1\t0\t2048\n")  # end (2048) > chrom_len (1500): pysam will clip
+
+    ds = _make_ref_dataset(fa, bed, n_samples=1)
+    item = ds[0]
+    assert len(item) == 2048, f"expected 2048, got {len(item)}"
+    assert item.dtype == np.uint8
+    assert (item[1500:] == 0).all(), "tail must be zero-padded"
+    assert (item[:1500] != 0).any(), "leading bases must be non-zero"
