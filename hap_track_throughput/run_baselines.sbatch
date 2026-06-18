@@ -5,7 +5,7 @@
 #SBATCH --nodelist=carter-cn-03
 #SBATCH --cpus-per-task=32
 #SBATCH --mem=96G
-#SBATCH --time=08:00:00
+#SBATCH --time=20:00:00
 #SBATCH --output=/carter/users/dlaub/projects/gvl-paper/results_gvl027/baselines_%j.log
 #SBATCH --error=/carter/users/dlaub/projects/gvl-paper/results_gvl027/baselines_%j.log
 #
@@ -18,14 +18,13 @@
 # taskset core-pinning (fragile under a shared cgroup that hands out non-contiguous
 # core IDs, and not how GVL swept threads).
 #
-# Dry-run timing (cn-03, job 11611503, 2026-06-17):
-#   kind=fasta, threads=1, 4 seqlens, time_limit_s=10, replicates=1, burn_in=1
-#   → 17m 28s wall, 38 cells, avg 27.6s/cell, peak RSS 27 GiB.
-#   Full-run (time_limit_s=45, replicates=3) upper-bound estimate:
-#     fasta: 138 cells; pybigwig: 124 cells; total 262 cells.
-#     Upper-bound avg = 27.6s × (45/10) × 3 = 373s/cell × 262 = 97,826s (~27h).
-#     Realistic (mix of fast/slow cells; higher T faster; pybigwig shallower BED):
-#     ~5-6h. Fits under 8h limit comfortably. No mitigation needed.
+# Pre-flight (cn-03, job 11611543, 2026-06-17; diploid + cold-read code):
+#   fasta T={4,16,32} + pybigwig T={16,32}, time_limit_s=15, replicates=1.
+#   → 1h03m wall, peak RSS 52.4 GiB (< 96 GiB cap; no OOM on the highest-RSS cells).
+#   Eviction confirmed: cold fasta T16 peak 1614 MiB/s vs warm 2100 (--no-drop-cache).
+#   Full-run (time_limit_s=45, replicates=3, all 8 thread×kind invocations) projects
+#   ~10-11h, so --time is set to 20h (carter-compute allows long jobs; the GVL grid
+#   itself used 7d). Memory-safe per the pre-flight; no cap tightening needed.
 # Note: fasta baseline is now 2 bytes/bp (diploid — reads two haplotype FASTA files
 # per item), so fewer large-batch fasta cells fit within the 96 GiB RAM cap.
 # Note: fasta baseline runs with drop_cache=True (default on) — posix_fadvise DONTNEED
