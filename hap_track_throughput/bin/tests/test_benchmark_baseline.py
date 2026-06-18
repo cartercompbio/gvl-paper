@@ -173,6 +173,43 @@ def test_fasta_pads_chromosome_boundary_tile(tmp_path):
     assert (item[1, :1500] != 0).any(), "hap2 leading bases must be non-zero"
 
 
+def test_bigwig_boundary_tile_zero_pads(tmp_path):
+    """BigWigDataset.__getitem__ must not raise when a tile overhangs the contig end.
+    The out-of-bounds tail must be zero-filled and the item shape must equal (1, seqlen),
+    matching GVL's out-of-bounds 0-fill convention (apples-to-apples with the tracks grid).
+    """
+    import numpy as np
+    import polars as pl
+    import pyBigWig
+    from benchmark_baseline import _make_bigwig_dataset
+
+    # Tiny bigwig: contig chr1 is only 1500 bp long.
+    bw_path = tmp_path / "s1.bw"
+    bw = pyBigWig.open(str(bw_path), "w")
+    bw.addHeader([("chr1", 1500)])
+    bw.addEntries("chr1", 0, values=np.ones(1500, dtype=np.float32), span=1, step=1)
+    bw.close()
+
+    table = tmp_path / "table.csv"
+    pl.DataFrame({"sample": ["s1"], "path": [str(bw_path)]}).write_csv(table)
+
+    # BED tile overhangs: end 2048 > contig length 1500.
+    bed = tmp_path / "tile_2048.bed"
+    bed.write_text("chr1\t0\t2048\n")
+
+    ds = _make_bigwig_dataset(table, bed)
+
+    # Must NOT raise (was: RuntimeError: Invalid interval bounds!).
+    item = ds[0]
+
+    assert item.shape == (1, 2048), f"expected (1, 2048), got {item.shape}"
+    assert item.dtype == np.float32
+    # Tail past contig end must be zero-filled.
+    assert (item[0, 1500:] == 0).all(), "out-of-bounds tail must be zero-padded"
+    # In-bounds region must have the written values (ones).
+    assert (item[0, :1500] == 1.0).all(), "in-bounds region must match bigwig values"
+
+
 def test_fasta_drop_cache_calls_fadvise(tmp_path, monkeypatch):
     """drop_cache=True must call posix_fadvise(DONTNEED) at least twice per item
     (once for each haplotype file) without corrupting the returned array."""

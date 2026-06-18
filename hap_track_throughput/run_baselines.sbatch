@@ -48,7 +48,8 @@ OUT="$ROOT/results_gvl027/baselines"
 mkdir -p "$OUT"
 THREADS=(1 4 16 32)
 
-for KIND in fasta pybigwig; do
+# KINDS env overrides which baselines run (e.g. KINDS=pybigwig to re-run only tracks).
+for KIND in ${KINDS:-fasta pybigwig}; do
   RES="$OUT/${KIND}.csv"
   rm -f "$RES"   # fresh; the script appends across thread counts
   for T in "${THREADS[@]}"; do

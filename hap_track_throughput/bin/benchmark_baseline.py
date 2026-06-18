@@ -192,7 +192,23 @@ def _make_bigwig_dataset(bigwig_table, bed: Path):
         def __getitem__(self, index):
             region, sample = map(int, np.unravel_index(index, self.shape))
             contig, start, end = self.bed.row(region)
-            return self.bigwigs.read(contig, start, end, sample=self.bigwigs.samples[sample])
+            seqlen = end - start
+            # Tiles can overhang chromosome ends; gvl.BigWigs.read -> pyBigWig.values
+            # raises on end > contig_length. Clip to the contig and zero-pad the tail,
+            # matching GVL's out-of-bounds 0-fill (apples-to-apples with the tracks grid).
+            contigs = self.bigwigs.contigs
+            clen = contigs.get(contig)
+            if clen is None:  # UCSC/non-UCSC mismatch — try chr-prefix variants
+                clen = contigs.get(contig.removeprefix("chr"), contigs.get("chr" + contig))
+            out = np.zeros((1, seqlen), dtype=np.float32)
+            if clen is not None:
+                end_c = min(end, clen)
+                valid = end_c - start
+                if valid > 0:
+                    out[:, :valid] = self.bigwigs.read(
+                        contig, start, end_c, sample=self.bigwigs.samples[sample]
+                    )
+            return out
 
     bigwigs = gvl.BigWigs.from_table("bw", bigwig_table)
     return BigWigDataset(bigwigs, bed)
