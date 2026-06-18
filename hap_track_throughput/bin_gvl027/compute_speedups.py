@@ -17,8 +17,13 @@ def main(
     import polars as pl
 
     def best(glob, group):
-        frames = [pl.read_csv(p) for p in (results_dir).glob(glob)]
-        df = pl.concat(frames).filter(pl.col("throughput (MiB/s)").is_not_nan())
+        paths = list(results_dir.glob(glob))
+        if not paths:
+            raise FileNotFoundError(f"No files matched {results_dir}/{glob} — run Task 8 first")
+        frames = [pl.read_csv(p, null_values=["nan"]) for p in paths]
+        df = pl.concat(frames).with_columns(
+            pl.col("throughput (MiB/s)").fill_nan(None)
+        ).drop_nulls("throughput (MiB/s)")
         return df.group_by(group).agg(pl.col("throughput (MiB/s)").max().alias("best_mib_s"))
 
     gvl_haps = best("haps/*_none.csv", ["dataset", "seqlen"])
