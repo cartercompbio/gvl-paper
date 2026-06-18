@@ -53,19 +53,24 @@ def select_cells(grid_file: Path, *, threads: int) -> list[tuple[int, int]]:
     return [(int(b), int(n)) for b, n in rows.iter_rows()]
 
 
-def _make_ref_dataset(fasta: Path, fasta2: Path, bed: Path, n_samples: int):
+def _make_ref_dataset(fasta: Path, fasta2: Path, bed: Path, n_samples: int, drop_cache: bool = True):
+    import os
     import numpy as np
     import polars as pl
     import pysam
     from torch.utils.data import Dataset
 
     class Ref(Dataset):
-        def __init__(self, path, path2, bed, n_samples):
+        def __init__(self, path, path2, bed, n_samples, drop_cache):
             self.path = path
             self.path2 = path2
             # fasta and fasta2 handles opened lazily in __getitem__ (worker-fork-safe)
             self.fasta = None
             self.fasta2 = None
+            # eviction fds opened lazily per-worker after fork (drop_cache path only)
+            self._evict_fd1 = None
+            self._evict_fd2 = None
+            self.drop_cache = drop_cache
             self.bed = pl.read_csv(
                 bed, separator="\t", has_header=False,
                 new_columns=["contig", "start", "end"],
@@ -113,9 +118,24 @@ def _make_ref_dataset(fasta: Path, fasta2: Path, bed: Path, n_samples: int):
             h1 = self._read_padded(self.fasta, contig, start, end)
             h2 = self._read_padded(self.fasta2, contig, start, end)
             # Stack to (2, seqlen) matching GVL's diploid (2, seqlen) uint8 output.
-            return np.stack([h1, h2])
+            result = np.stack([h1, h2])
+            if self.drop_cache:
+                # Evict each haplotype file's pages from the OS page cache after every
+                # read so the next item sees a cold storage read. This mirrors the
+                # real bcftools-consensus workflow: 2*n_samples FASTAs (tens of TB)
+                # never fit in RAM, so reads are always cold. GVL's small working set
+                # legitimately fits in RAM — page-cache eviction is the honest baseline.
+                # Lazily open separate fds for fadvise (per-worker after fork).
+                if self._evict_fd1 is None:
+                    self._evict_fd1 = os.open(str(self.path), os.O_RDONLY)
+                if self._evict_fd2 is None:
+                    self._evict_fd2 = os.open(str(self.path2), os.O_RDONLY)
+                # offset=0, length=0 → entire file
+                os.posix_fadvise(self._evict_fd1, 0, 0, os.POSIX_FADV_DONTNEED)
+                os.posix_fadvise(self._evict_fd2, 0, 0, os.POSIX_FADV_DONTNEED)
+            return result
 
-    return Ref(fasta, fasta2, bed, n_samples)
+    return Ref(fasta, fasta2, bed, n_samples, drop_cache)
 
 
 def _measure_and_write(
@@ -178,6 +198,7 @@ def _make_bigwig_dataset(bigwig_table, bed: Path):
 def run_kind(
     *, kind, threads, fasta, fasta2=None, bigwig_table, bed_dir, grid_dir, seqlens,
     results, n_samples, mem_cap_bytes, burn_in, replicates, time_limit_s, min_batches,
+    drop_cache: bool = True,
 ):
     from _bench_common import THROUGHPUT_HEADER
 
@@ -208,7 +229,7 @@ def run_kind(
                     f.flush()
                     continue
                 if kind == "fasta":
-                    ds = _make_ref_dataset(fasta, fasta2, bed, n_samples)
+                    ds = _make_ref_dataset(fasta, fasta2, bed, n_samples, drop_cache=drop_cache)
                 else:
                     ds = _make_bigwig_dataset(bigwig_table, bed)
                 _measure_and_write(
@@ -236,9 +257,15 @@ def main(
     replicates: int = 3,
     time_limit_s: float = 45.0,
     min_batches: int = 5,
+    drop_cache: bool = True,
 ):
     """Measure one baseline kind at one thread count. Threads are limited by the
-    caller via taskset; this just reports `threads` and sets num_workers=threads-1."""
+    caller via taskset; this just reports `threads` and sets num_workers=threads-1.
+
+    drop_cache (FASTA only): evict each haplotype file's pages via posix_fadvise
+    DONTNEED after every read, forcing cold storage reads. Default on — real
+    bcftools-consensus cohorts use 2*n_samples FASTAs (tens of TB) that never
+    fit in RAM. Pass --no-drop-cache to disable (for profiling / warm-cache runs)."""
     if kind not in ("fasta", "pybigwig"):
         raise ValueError(f"kind must be 'fasta' or 'pybigwig', got {kind!r}")
     seqlens = [2048, 16384, 131072, 1048576]
@@ -247,7 +274,8 @@ def main(
         bigwig_table=bigwig_table if kind == "pybigwig" else None,
         bed_dir=bed_dir, grid_dir=grid_dir, seqlens=seqlens, results=results,
         n_samples=n_samples, mem_cap_bytes=int(mem_cap_gib * 2**30),
-        burn_in=burn_in, replicates=replicates, time_limit_s=time_limit_s, min_batches=min_batches,
+        burn_in=burn_in, replicates=replicates, time_limit_s=time_limit_s,
+        min_batches=min_batches, drop_cache=drop_cache,
     )
 
 

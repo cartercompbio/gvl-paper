@@ -111,7 +111,7 @@ def test_fasta_item_is_diploid(tmp_path):
     fa, fa2 = _write_two_fastas(tmp_path)
     bed = _write_bed(tmp_path, 2048, 4)
 
-    ds = _make_ref_dataset(fa, fa2, bed, n_samples=1)
+    ds = _make_ref_dataset(fa, fa2, bed, n_samples=1, drop_cache=False)
     item = ds[0]
     assert item.shape == (2, 2048), f"expected (2, 2048), got {item.shape}"
     assert item.dtype == np.uint8
@@ -163,7 +163,7 @@ def test_fasta_pads_chromosome_boundary_tile(tmp_path):
     bed = tmp_path / "tile_2048.bed"
     bed.write_text("chr1\t0\t2048\n")  # end (2048) > chrom_len (1500): pysam will clip
 
-    ds = _make_ref_dataset(fa, fa2, bed, n_samples=1)
+    ds = _make_ref_dataset(fa, fa2, bed, n_samples=1, drop_cache=False)
     item = ds[0]
     assert item.shape == (2, 2048), f"expected (2, 2048), got {item.shape}"
     assert item.dtype == np.uint8
@@ -171,3 +171,40 @@ def test_fasta_pads_chromosome_boundary_tile(tmp_path):
     assert (item[1, 1500:] == 0).all(), "hap2 tail must be zero-padded"
     assert (item[0, :1500] != 0).any(), "hap1 leading bases must be non-zero"
     assert (item[1, :1500] != 0).any(), "hap2 leading bases must be non-zero"
+
+
+def test_fasta_drop_cache_calls_fadvise(tmp_path, monkeypatch):
+    """drop_cache=True must call posix_fadvise(DONTNEED) at least twice per item
+    (once for each haplotype file) without corrupting the returned array."""
+    import os
+    import numpy as np
+    from benchmark_baseline import _make_ref_dataset
+
+    fa, fa2 = _write_two_fastas(tmp_path)
+    bed = _write_bed(tmp_path, 2048, 4)
+
+    calls = []
+
+    def _record_fadvise(fd, offset, length, advice):
+        calls.append((fd, offset, length, advice))
+
+    monkeypatch.setattr("os.posix_fadvise", _record_fadvise)
+
+    ds = _make_ref_dataset(fa, fa2, bed, n_samples=1, drop_cache=True)
+    item = ds[0]
+
+    # Returned array must still be correct shape and dtype.
+    assert item.shape == (2, 2048), f"expected (2, 2048), got {item.shape}"
+    assert item.dtype == np.uint8
+
+    # posix_fadvise must have been called at least twice with POSIX_FADV_DONTNEED
+    # (once per haplotype file), covering the whole file (offset=0, length=0).
+    dontneed_calls = [c for c in calls if c[3] == os.POSIX_FADV_DONTNEED]
+    assert len(dontneed_calls) >= 2, (
+        f"expected >=2 POSIX_FADV_DONTNEED fadvise calls, got {len(dontneed_calls)}: {calls}"
+    )
+    # Both calls must use offset=0, length=0 (whole-file eviction).
+    for fd, offset, length, advice in dontneed_calls:
+        assert offset == 0 and length == 0, (
+            f"expected whole-file fadvise (offset=0, length=0), got offset={offset} length={length}"
+        )

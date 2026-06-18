@@ -25,6 +25,9 @@
 #     ~5-6h. Fits under 8h limit comfortably. No mitigation needed.
 # Note: fasta baseline is now 2 bytes/bp (diploid — reads two haplotype FASTA files
 # per item), so fewer large-batch fasta cells fit within the 96 GiB RAM cap.
+# Note: fasta baseline runs with drop_cache=True (default on) — posix_fadvise DONTNEED
+# evicts each hap file's pages after every read, so every fetch is a cold storage read,
+# mirroring a real bcftools-consensus cohort where 2*n_samples FASTAs never fit in RAM.
 set -euo pipefail
 export PATH="/cellar/users/dlaub/.pixi/bin:$PATH"
 ROOT=/carter/users/dlaub/projects/gvl-paper
