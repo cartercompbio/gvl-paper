@@ -147,6 +147,41 @@ def test_bigwig_driver_writes_comparable_schema(tmp_path):
     assert df["throughput (MiB/s)"].drop_nulls().gt(0).all()
 
 
+def test_max_batch_skips_oversized_cells_as_nan(tmp_path):
+    """max_batch records NaN (not a measurement) for batch_size > max_batch."""
+    import numpy as np
+    import polars as pl
+    import pyBigWig
+    from benchmark_baseline import run_kind
+
+    bw_path = tmp_path / "s1.bw"
+    bw = pyBigWig.open(str(bw_path), "w")
+    bw.addHeader([("chr1", 10_000)])
+    bw.addEntries("chr1", 0, values=np.ones(10_000, dtype=np.float32), span=1, step=1)
+    bw.close()
+    table = tmp_path / "table.csv"
+    pl.DataFrame({"sample": ["s1"], "path": [str(bw_path)]}).write_csv(table)
+
+    _write_bed(tmp_path, 2048, 8)
+    # two cells: batch 2 (<= cap, measured) and batch 32 (> cap, skipped -> NaN)
+    pl.DataFrame(
+        {"threads": [1, 1], "batch_size": [2, 32], "n_batches": [3, 3]}
+    ).write_csv(tmp_path / "grid_2048.csv")
+    out = tmp_path / "pybigwig.csv"
+
+    run_kind(
+        kind="pybigwig", threads=1, fasta=None, bigwig_table=table,
+        bed_dir=tmp_path, grid_dir=tmp_path, seqlens=[2048],
+        results=out, n_samples=1, mem_cap_bytes=96 * 2**30,
+        burn_in=1, replicates=1, time_limit_s=5.0, min_batches=1, max_batch=2,
+    )
+    df = pl.read_csv(out, null_values=["nan"])
+    capped = df.filter(pl.col("batch_size") == 32)
+    measured = df.filter(pl.col("batch_size") == 2)
+    assert capped.height == 1 and capped["throughput (MiB/s)"].null_count() == 1
+    assert measured["throughput (MiB/s)"].drop_nulls().gt(0).all()
+
+
 def test_fasta_pads_chromosome_boundary_tile(tmp_path):
     """pysam clips tiles that overhang chromosome ends; __getitem__ must zero-pad to seqlen
     for BOTH haplotypes."""

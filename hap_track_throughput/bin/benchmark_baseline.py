@@ -217,7 +217,7 @@ def _make_bigwig_dataset(bigwig_table, bed: Path):
 def run_kind(
     *, kind, threads, fasta, fasta2=None, bigwig_table, bed_dir, grid_dir, seqlens,
     results, n_samples, mem_cap_bytes, burn_in, replicates, time_limit_s, min_batches,
-    drop_cache: bool = True,
+    drop_cache: bool = True, max_batch: int | None = None,
 ):
     from _bench_common import THROUGHPUT_HEADER
 
@@ -239,6 +239,15 @@ def run_kind(
             grid_file = Path(grid_dir) / f"grid_{seqlen}.csv"
             bed = Path(bed_dir) / f"tile_{seqlen}.bed"
             for batch_size, n_batches in select_cells(grid_file, threads=threads):
+                if max_batch is not None and batch_size > max_batch:
+                    # These overhead-bound readers peak at small batches (the FASTA
+                    # baseline peaks at batch<=512); giant batches are never the
+                    # throughput max but cost minutes/batch single-threaded. Skip
+                    # them (record NaN) so the run finishes — the per-seqlen peak,
+                    # which is all compute_speedups uses, is unaffected.
+                    f.write(f"{dataset},{backend},none,{threads},{seqlen},{batch_size},0,0,0,nan\n")
+                    f.flush()
+                    continue
                 if not cell_fits(
                     batch_size=batch_size, seqlen=seqlen, bytes_per_bp=bytes_per_bp,
                     num_workers=num_workers, prefetch_factor=prefetch_factor,
@@ -277,6 +286,7 @@ def main(
     time_limit_s: float = 45.0,
     min_batches: int = 5,
     drop_cache: bool = True,
+    max_batch: int | None = None,
 ):
     """Measure one baseline kind at one thread count. `threads` sets the data-loading
     parallelism: num_workers = threads - 1 (count-based, like GVL's set_num_threads;
@@ -285,7 +295,12 @@ def main(
     drop_cache (FASTA only): evict each haplotype file's pages via posix_fadvise
     DONTNEED after every read, forcing cold storage reads. Default on — real
     bcftools-consensus cohorts use 2*n_samples FASTAs (tens of TB) that never
-    fit in RAM. Pass --no-drop-cache to disable (for profiling / warm-cache runs)."""
+    fit in RAM. Pass --no-drop-cache to disable (for profiling / warm-cache runs).
+
+    max_batch: skip (record NaN) cells whose batch_size exceeds this. These
+    overhead-bound readers peak at small batches, so giant batches are never the
+    per-seqlen throughput max but cost minutes/batch at low thread counts; capping
+    keeps the run tractable without affecting the peak compute_speedups uses."""
     if kind not in ("fasta", "pybigwig"):
         raise ValueError(f"kind must be 'fasta' or 'pybigwig', got {kind!r}")
     seqlens = [2048, 16384, 131072, 1048576]
@@ -295,7 +310,7 @@ def main(
         bed_dir=bed_dir, grid_dir=grid_dir, seqlens=seqlens, results=results,
         n_samples=n_samples, mem_cap_bytes=int(mem_cap_gib * 2**30),
         burn_in=burn_in, replicates=replicates, time_limit_s=time_limit_s,
-        min_batches=min_batches, drop_cache=drop_cache,
+        min_batches=min_batches, drop_cache=drop_cache, max_batch=max_batch,
     )
 
 
