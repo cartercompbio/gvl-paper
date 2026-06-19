@@ -94,10 +94,26 @@ def panel_disk(ax):
             ax, y + (i - 0.5) * h, vals, height=h, color=colors[impl], label=impl
         )
     ax.set_xlim(left=0.05)  # floor: bars start at a sensible left edge, not log(0)
-    ax.format(xlabel="Disk space (GB)", ylabel="", title="Storage")
-    ax.set_yticks(y)
-    ax.set_yticklabels(datasets)
-    ax.invert_yaxis()  # first dataset at top, matching the standalone panel
+    # Set ticks/labels THROUGH ultraplot's format so auto-layout reserves room for
+    # them (matplotlib set_yticklabels after format does not, so labels overlapped).
+    # yreverse puts the first dataset at the top, matching the standalone panel.
+    short = {
+        "TCGA BRCA ATAC (n=62)": "TCGA ATAC (62)",
+        "1000 Genomes (n=3,202)": "1000G (3,202)",
+        "GDC (n=16,007)": "GDC (16,007)",
+        "Biobank, chr22 (n=487,409)": "Biobank (487k)",
+    }
+    # Explicit ylim: ultraplot's autoscale otherwise blows the y-range up to
+    # +/-3851 (collapsing the 4 ticks to the center). Reversed tuple puts the
+    # first dataset at the top, matching the standalone panel.
+    ax.format(
+        xlabel="Disk space (GB)",
+        ylabel="",
+        title="Storage",
+        yticks=list(y),
+        yticklabels=[short[d] for d in datasets],
+        ylim=(len(datasets) - 0.5, -0.5),
+    )
     _clean_legend(ax, ["GVL", "FASTA"], loc="lr", ncols=1)
 
 
