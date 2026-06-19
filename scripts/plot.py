@@ -7,6 +7,16 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import polars as pl
 import seaborn as sns
+import sys
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _fig_data import (  # noqa: E402
+    GVL027_LABELS,
+    RAM_BW_GBPS,
+    RAM_BW_LABEL,
+    disk_usage_df,
+    gvl027_grid,
+    gvl027_peak,
+)
 
 sns.set_context("notebook", font_scale=1.5)
 proj_dir = Path(__file__).parent.parent
@@ -23,48 +33,6 @@ fig_dir.mkdir(parents=True, exist_ok=True)
 # hardware). The horizontal reference in every panel is cn-03's max sustained RAM
 # bandwidth (STREAM Triad ~35 GB/s) — the real throughput ceiling on this
 # hardware — replacing the old 31.5 GB/s A100 CPU->GPU PCIe line.
-RAM_BW_GBPS = 35.0
-RAM_BW_LABEL = "cn-03 max RAM\nbandwidth"
-GVL027_LABELS = {
-    "TCGA_ATAC": "GVL: TCGA BRCA ATAC (n=62)",
-    "1KGP": "GVL: 1000 Genomes (n=3,202)",
-    "UKBB": "GVL: Biobank (n=487,409)",
-}
-
-
-def gvl027_peak(result_glob: str) -> pl.DataFrame:
-    """Max eager (mode=none) throughput per (dataset, seqlen), in GB/s."""
-    files = sorted(glob.glob(str(proj_dir / result_glob)))
-    if not files:
-        raise FileNotFoundError(f"no GVL 0.27.0 result CSVs matched {result_glob!r}")
-    df = pl.concat([pl.read_csv(c) for c in files], how="vertical_relaxed").with_columns(
-        pl.col("throughput (MiB/s)").cast(pl.Float64, strict=False)
-    )
-    df = df.filter(
-        pl.col("throughput (MiB/s)").is_finite() & (pl.col("throughput (MiB/s)") > 0)
-    )
-    return (
-        df.group_by("dataset", "seqlen")
-        .agg(throughput=(pl.col("throughput (MiB/s)").max() * 2**20 / 1e9))
-        .sort("dataset", "seqlen")
-    )
-
-
-def gvl027_grid(result_glob: str) -> pl.DataFrame:
-    """Per-cell eager (mode=none) throughput grid, GB/s, with n_nucleotides."""
-    files = sorted(glob.glob(str(proj_dir / result_glob)))
-    if not files:
-        raise FileNotFoundError(f"no GVL 0.27.0 result CSVs matched {result_glob!r}")
-    df = pl.concat([pl.read_csv(c) for c in files], how="vertical_relaxed").with_columns(
-        pl.col("throughput (MiB/s)").cast(pl.Float64, strict=False)
-    )
-    df = df.filter(
-        pl.col("throughput (MiB/s)").is_finite() & (pl.col("throughput (MiB/s)") > 0)
-    )
-    return df.with_columns(
-        n_nucleotides=pl.col("seqlen") * pl.col("batch_size"),
-        throughput=pl.col("throughput (MiB/s)") * 2**20 / 1e9,  # GB/s
-    )
 
 # %% hap data (GVL 0.27.0 eager grid + same-HW FASTA baseline)
 results = gvl027_grid("results_gvl027/haps/*_none.csv")
@@ -282,31 +250,7 @@ plt.savefig(fig_dir / "best_haplotype_performance.png", dpi=300)
 plt.savefig(fig_dir / "best_haplotype_performance.svg")
 
 # %% disk usage
-compressed_hg37 = 0.987
-compressed_hg38 = 0.875
-memory = pl.DataFrame({
-    "Dataset": [
-        "TCGA BRCA ATAC (n=62)",
-        "TCGA BRCA ATAC (n=62)",
-        "1000 Genomes (n=3,202)",
-        "1000 Genomes (n=3,202)",
-        "GDC (n=16,007)",
-        "GDC (n=16,007)",
-        "Biobank, chr22 (n=487,409)",
-        "Biobank, chr22 (n=487,409)",
-    ],
-    "Implementation": ["GVL", "FASTA"] * 4,
-    "Disk Space (GB)": [
-        0.173,
-        compressed_hg37 * 62 * 2,
-        3.1,
-        compressed_hg37 * 3202 * 2,
-        7.9,
-        compressed_hg38 * 16007,
-        30,
-        0.0096 * 487409 * 2,  # just chr22
-    ],
-})
+memory = disk_usage_df()
 fg = sns.catplot(
     memory,
     x="Disk Space (GB)",
