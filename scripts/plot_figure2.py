@@ -11,6 +11,7 @@ docs/superpowers/specs/2026-06-18-figure2-unified-svg-design.md.
 import sys
 from pathlib import Path
 
+import matplotlib.legend as mlegend
 import numpy as np
 import polars as pl
 import seaborn as sns
@@ -39,16 +40,43 @@ HAP_HUE_ORDER = [
 VARIANT_ORDER = ["SVAR", "PRESUB-BCF", "BCF", "PGEN"]
 
 
-def _ram_bw_line(ax, xmin):
+def _ram_bw_line(ax, xmax):
+    # Label at the right end of the line: the top-right corner is empty (curves
+    # peak ~19 GB/s, below the 35 GB/s ceiling) and clear of the a)-f) letters.
     ax.axhline(RAM_BW_GBPS, c="k", ls="--", alpha=0.5, linewidth=2)
-    ax.text(xmin, RAM_BW_GBPS, RAM_BW_LABEL, va="bottom", ha="left", fontsize=7)
+    ax.text(xmax, RAM_BW_GBPS, RAM_BW_LABEL, va="bottom", ha="right", fontsize=7)
+
+
+def _clean_legend(ax, keep_labels, **kw):
+    """Build one legend from explicit handles, keeping only `keep_labels` in order.
+
+    Avoids ultraplot's auto-collecting legend, which otherwise scrapes seaborn's
+    internal artists (e.g. 'y', 'ymin', 'width') and duplicates the legend box.
+    """
+    handles, labels = ax.get_legend_handles_labels()
+    by_label = {}
+    for h, lab in zip(handles, labels):
+        by_label.setdefault(lab, h)
+    # Hide every pre-existing legend before adding ours. ultraplot auto-creates a
+    # legend from labeled artists and stores it as an axes child (NOT ax.legend_),
+    # polluted with seaborn internals ('y', 'ymin', 'width'). Legends can't be
+    # .remove()'d on ultraplot axes, so hide them.
+    if getattr(ax, "legend_", None) is not None:
+        ax.legend_.set_visible(False)
+    for child in list(ax.get_children()):
+        if isinstance(child, mlegend.Legend):
+            child.set_visible(False)
+    ordered = [(by_label[lab], lab) for lab in keep_labels if lab in by_label]
+    if ordered:
+        hs, ls = zip(*ordered)
+        ax.legend(list(hs), list(ls), **kw)
 
 
 def panel_disk(ax):
     df = disk_usage_df().to_pandas()
     sns.barplot(df, x="Disk Space (GB)", y="Dataset", hue="Implementation", ax=ax)
     ax.format(xscale="log", xlabel="Disk space (GB)", ylabel="", title="Storage")
-    ax.legend(loc="lr", ncols=1)
+    _clean_legend(ax, ["GVL", "FASTA"], loc="lr", ncols=1)
 
 
 def panel_variant_n(ax):
@@ -74,7 +102,7 @@ def panel_variant_n(ax):
         ylabel=r"$\log_{10}$ variant calls/s",
         title="Variant query throughput",
     )
-    ax.legend(loc="lr", ncols=1)
+    _clean_legend(ax, VARIANT_ORDER, loc="lr", ncols=1, fontsize=7)
 
 
 def panel_haps(ax):
@@ -94,12 +122,12 @@ def panel_haps(ax):
         solid_joinstyle="round",
         solid_capstyle="round",
     )
-    _ram_bw_line(ax, gvl["seqlen"].min())
+    _ram_bw_line(ax, gvl["seqlen"].max())
     ax.format(
         xscale="log", yscale="log", xlabel="Sequence length",
         ylabel="Throughput (GB/s)", title="Haplotypes vs FASTA",
     )
-    ax.legend(loc="lr", ncols=1, fontsize=6)
+    _clean_legend(ax, HAP_HUE_ORDER, loc="lr", ncols=1, fontsize=6)
 
 
 def panel_tracks(ax):
@@ -109,12 +137,12 @@ def panel_tracks(ax):
                  linewidth=2.5, solid_joinstyle="round", solid_capstyle="round")
     sns.lineplot(bw.to_pandas(), x="seqlen", y="throughput", ax=ax, label="BigWig",
                  color="C2", linewidth=2.5, solid_joinstyle="round", solid_capstyle="round")
-    _ram_bw_line(ax, bw["seqlen"].min())
+    _ram_bw_line(ax, bw["seqlen"].max())
     ax.format(
         xscale="log", yscale="log", xlabel="Sequence length",
         ylabel="Throughput (GB/s)", title="Tracks vs BigWig",
     )
-    ax.legend(loc="lr", ncols=1)
+    _clean_legend(ax, ["GVL", "BigWig"], loc="lr", ncols=1)
 
 
 def panel_gpu_placeholder(ax):
@@ -140,7 +168,13 @@ def panel_basenji2(ax):
     sns.ecdfplot(indiv_rho, label=r"$\rho$ across individuals", ax=ax, linewidth=2.5)
     ax.axvline(np.nanmean(indiv_rho), c="k", ls="--", alpha=0.5, linewidth=2)
     ax.format(xlabel=r"Spearman $\rho$", ylabel="Proportion", title="Basenji2 evaluation")
-    ax.legend(loc="ul", ncols=1, fontsize=6)
+    _clean_legend(
+        ax,
+        [r"$\rho$ across genes", r"$\rho$ across individuals"],
+        loc="ul",
+        ncols=1,
+        fontsize=6,
+    )
 
 
 def main():
