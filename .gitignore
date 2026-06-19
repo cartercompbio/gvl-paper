@@ -201,3 +201,5 @@ variant_throughput/results_recover/*.log
 
 # Private drafts
 text/*
+# scratch: baseline pre-flight validation (not a deliverable)
+results_gvl027/preflight/
