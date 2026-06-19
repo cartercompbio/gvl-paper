@@ -11,6 +11,7 @@ docs/superpowers/specs/2026-06-18-figure2-unified-svg-design.md.
 import sys
 from pathlib import Path
 
+import matplotlib.axes as maxes
 import matplotlib.legend as mlegend
 import numpy as np
 import polars as pl
@@ -73,9 +74,30 @@ def _clean_legend(ax, keep_labels, **kw):
 
 
 def panel_disk(ax):
-    df = disk_usage_df().to_pandas()
-    sns.barplot(df, x="Disk Space (GB)", y="Dataset", hue="Implementation", ax=ax)
-    ax.format(xscale="log", xlabel="Disk space (GB)", ylabel="", title="Storage")
+    df = disk_usage_df()
+    datasets = df["Dataset"].unique(maintain_order=True).to_list()
+    colors = dict(zip(["GVL", "FASTA"], sns.color_palette(n_colors=2)))
+    y = np.arange(len(datasets))
+    h = 0.38
+    ax.set_xscale("log")
+    for i, impl in enumerate(["GVL", "FASTA"]):
+        vals = [
+            df.filter((pl.col("Dataset") == ds) & (pl.col("Implementation") == impl))[
+                "Disk Space (GB)"
+            ].item()
+            for ds in datasets
+        ]
+        # ultraplot's bar wrapper mis-handles seaborn's barh (it treats the data
+        # values as bar thickness, blowing the bars up to fill the panel). Call
+        # matplotlib's barh directly to bypass the wrapper.
+        maxes.Axes.barh(
+            ax, y + (i - 0.5) * h, vals, height=h, color=colors[impl], label=impl
+        )
+    ax.set_xlim(left=0.05)  # floor: bars start at a sensible left edge, not log(0)
+    ax.format(xlabel="Disk space (GB)", ylabel="", title="Storage")
+    ax.set_yticks(y)
+    ax.set_yticklabels(datasets)
+    ax.invert_yaxis()  # first dataset at top, matching the standalone panel
     _clean_legend(ax, ["GVL", "FASTA"], loc="lr", ncols=1)
 
 
