@@ -92,6 +92,10 @@ def main(
         n_regions,
     )
 
+    # Cache the rho arrays so the unified Figure 2 composite (scripts/plot_figure2.py)
+    # can render panel F without re-touching controlled-access RNA-seq + the heavy memmap.
+    np.savez(fig_dir / "basenji2_rho.npz", gene_rho=gene_rho, indiv_rho=indiv_rho)
+
     # %%
     fig, ax = plt.subplots()
     sns.ecdfplot(gene_rho.ravel(), label=r"$\rho$ across genes", ax=ax, linewidth=3)
