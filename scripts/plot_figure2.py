@@ -11,9 +11,9 @@ docs/superpowers/specs/2026-06-18-figure2-unified-svg-design.md.
 import sys
 from pathlib import Path
 
-import matplotlib.axes as maxes
 import matplotlib.legend as mlegend
 import numpy as np
+from matplotlib.patches import Patch, Rectangle
 import polars as pl
 import seaborn as sns
 import ultraplot as uplt
@@ -76,45 +76,45 @@ def _clean_legend(ax, keep_labels, **kw):
 def panel_disk(ax):
     df = disk_usage_df()
     datasets = df["Dataset"].unique(maintain_order=True).to_list()
-    colors = dict(zip(["GVL", "FASTA"], sns.color_palette(n_colors=2)))
-    y = np.arange(len(datasets))
-    h = 0.38
+    impls = ["GVL", "FASTA"]
+    colors = dict(zip(impls, sns.color_palette(n_colors=2)))
+    floor = 0.05  # left edge of bars (log axis can't start at 0)
+    th = 0.4  # bar thickness in y
     ax.set_xscale("log")
-    for i, impl in enumerate(["GVL", "FASTA"]):
-        vals = [
-            df.filter((pl.col("Dataset") == ds) & (pl.col("Implementation") == impl))[
-                "Disk Space (GB)"
-            ].item()
-            for ds in datasets
-        ]
-        # ultraplot's bar wrapper mis-handles seaborn's barh (it treats the data
-        # values as bar thickness, blowing the bars up to fill the panel). Call
-        # matplotlib's barh directly to bypass the wrapper.
-        maxes.Axes.barh(
-            ax, y + (i - 0.5) * h, vals, height=h, color=colors[impl], label=impl
-        )
-    ax.set_xlim(left=0.05)  # floor: bars start at a sensible left edge, not log(0)
-    # Set ticks/labels THROUGH ultraplot's format so auto-layout reserves room for
-    # them (matplotlib set_yticklabels after format does not, so labels overlapped).
-    # yreverse puts the first dataset at the top, matching the standalone panel.
+    # ultraplot monkeypatches bar/barh at the matplotlib class level with a
+    # different arg convention, mangling both seaborn's call and matplotlib's
+    # barh (bars come out vertical, with the data value as the y-extent). Draw
+    # the grouped horizontal bars as plain Rectangle patches, which no wrapper
+    # intercepts: x from floor to value, y a fixed-thickness slab per dataset.
+    for i, impl in enumerate(impls):
+        for j, ds in enumerate(datasets):
+            v = df.filter(
+                (pl.col("Dataset") == ds) & (pl.col("Implementation") == impl)
+            )["Disk Space (GB)"].item()
+            ax.add_patch(
+                Rectangle((floor, j + (i - 1) * th), v - floor, th, color=colors[impl])
+            )
     short = {
         "TCGA BRCA ATAC (n=62)": "TCGA ATAC (62)",
         "1000 Genomes (n=3,202)": "1000G (3,202)",
         "GDC (n=16,007)": "GDC (16,007)",
         "Biobank, chr22 (n=487,409)": "Biobank (487k)",
     }
-    # Explicit ylim: ultraplot's autoscale otherwise blows the y-range up to
-    # +/-3851 (collapsing the 4 ticks to the center). Reversed tuple puts the
-    # first dataset at the top, matching the standalone panel.
+    # Explicit xlim/ylim: ultraplot's autoscale ignores add_patch extents (it
+    # otherwise blew the y-range up to +/-3851). Reversed ylim = first dataset on top.
     ax.format(
         xlabel="Disk space (GB)",
         ylabel="",
         title="Storage",
-        yticks=list(y),
+        xlim=(floor, df["Disk Space (GB)"].max() * 2),
+        yticks=list(np.arange(len(datasets))),
         yticklabels=[short[d] for d in datasets],
         ylim=(len(datasets) - 0.5, -0.5),
     )
-    _clean_legend(ax, ["GVL", "FASTA"], loc="lr", ncols=1)
+    for child in list(ax.get_children()):
+        if isinstance(child, mlegend.Legend):
+            child.set_visible(False)
+    ax.legend([Patch(color=colors[k], label=k) for k in impls], impls, loc="lr", ncols=1)
 
 
 def panel_variant(ax):
