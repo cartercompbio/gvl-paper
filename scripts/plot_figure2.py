@@ -25,7 +25,7 @@ from _fig_data import (  # noqa: E402
     RAM_BW_LABEL,
     disk_usage_df,
     gvl027_peak,
-    variant_n_df,
+    variant_qlen_df,
 )
 
 proj_dir = Path(__file__).resolve().parent.parent
@@ -101,8 +101,8 @@ def panel_disk(ax):
     _clean_legend(ax, ["GVL", "FASTA"], loc="lr", ncols=1)
 
 
-def panel_variant_n(ax):
-    df = variant_n_df().to_pandas()
+def panel_variant(ax):
+    df = variant_qlen_df().to_pandas()
     palette = dict(zip(VARIANT_ORDER, sns.color_palette(n_colors=len(VARIANT_ORDER))))
     for method in VARIANT_ORDER:
         sub = df[df["method_label"] == method]
@@ -110,7 +110,7 @@ def panel_variant_n(ax):
             continue
         sns.regplot(
             data=sub,
-            x="log10_n_samples",
+            x="log10_query_length",
             y="log10_calls_per_sec",
             lowess=True,
             ax=ax,
@@ -120,11 +120,11 @@ def panel_variant_n(ax):
             line_kws=dict(linewidth=2),
         )
     ax.format(
-        xlabel=r"$\log_{10}$ cohort size (N)",
+        xlabel=r"$\log_{10}$ query length (bp)",
         ylabel=r"$\log_{10}$ variant calls/s",
         title="Variant query throughput",
     )
-    _clean_legend(ax, VARIANT_ORDER, loc="lr", ncols=1, fontsize=7)
+    _clean_legend(ax, VARIANT_ORDER, loc="ur", ncols=1, fontsize=7)
 
 
 def panel_haps(ax):
@@ -203,7 +203,7 @@ def main():
     fig, axs = uplt.subplots(nrows=2, ncols=3, refwidth=2.3, share=False)
     fig.format(abc="a)", abcloc="ul")
     panel_disk(axs[0])
-    panel_variant_n(axs[1])
+    panel_variant(axs[1])
     panel_haps(axs[2])
     panel_tracks(axs[3])
     panel_gpu_placeholder(axs[4])

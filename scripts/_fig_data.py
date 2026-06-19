@@ -92,13 +92,13 @@ def disk_usage_df() -> pl.DataFrame:
     })
 
 
-def variant_n_df() -> pl.DataFrame:
-    """Variant calls/sec vs cohort size N, by file type (Fig. 2B, the N-sweep).
+def variant_qlen_df() -> pl.DataFrame:
+    """Variant calls/sec vs query length, by file type (Fig. 2B), at full cohort.
 
-    Reads variant_throughput/results/*_throughput.csv. The N-sweep query
-    length(s) are those whose rows span more than one distinct n_samples
-    (matches variant_throughput/bin/plot_throughput.py). Returns columns:
-    log10_n_samples, log10_calls_per_sec, method_label, calls_per_sec.
+    Reads variant_throughput/results/*_throughput.csv, restricted to the largest
+    cohort (n_samples == max), matching the query-length view in
+    variant_throughput/bin/plot_throughput.py. Returns columns:
+    log10_query_length, log10_calls_per_sec, method_label, calls_per_sec.
     """
     csvs = sorted(glob.glob(str(proj_dir / "variant_throughput/results/*_throughput.csv")))
     if not csvs:
@@ -107,20 +107,15 @@ def variant_n_df() -> pl.DataFrame:
         [pl.read_csv(p, schema_overrides={"setup_ns": pl.Int64}) for p in csvs],
         how="vertical_relaxed",
     )
-    n_sweep_qlens = (
-        raw.group_by("query_length")
-        .agg(pl.col("n_samples").n_unique().alias("n_unique"))
-        .filter(pl.col("n_unique") > 1)["query_length"]
-        .to_list()
-    )
+    full_n = raw["n_samples"].max()
     return (
-        raw.filter(pl.col("query_length").is_in(n_sweep_qlens))
+        raw.filter(pl.col("n_samples") == full_n)
         .filter((pl.col("n_calls") > 0) & (pl.col("elapsed_ns") > 0))
         .with_columns(
             (pl.col("n_calls") / (pl.col("elapsed_ns") * 1e-9)).alias("calls_per_sec")
         )
         .with_columns(
-            pl.col("n_samples").log(base=10).alias("log10_n_samples"),
+            pl.col("query_length").log(base=10).alias("log10_query_length"),
             pl.col("calls_per_sec").log(base=10).alias("log10_calls_per_sec"),
             pl.col("method").replace(METHOD_LABELS).alias("method_label"),
         )
