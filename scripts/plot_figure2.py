@@ -97,7 +97,6 @@ def panel_disk(ax):
     short = {
         "TCGA BRCA ATAC (n=62)": "TCGA ATAC (62)",
         "1000 Genomes (n=3,202)": "1000G (3,202)",
-        "GDC (n=16,007)": "GDC (16,007)",
         "Biobank, chr22 (n=487,409)": "Biobank (487k)",
     }
     # Explicit xlim/ylim: ultraplot's autoscale ignores add_patch extents (it

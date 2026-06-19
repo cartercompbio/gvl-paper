@@ -66,26 +66,23 @@ def gvl027_grid(result_glob: str) -> pl.DataFrame:
 def disk_usage_df() -> pl.DataFrame:
     """Personalized-genome disk footprint, GVL vs compressed FASTA (Fig. 2A)."""
     compressed_hg37 = 0.987
-    compressed_hg38 = 0.875
+    # GDC (n=16,007) omitted: it appears in no other benchmark, so showing it
+    # only here would draw reviewer questions. (compressed_hg38 was only used for it.)
     return pl.DataFrame({
         "Dataset": [
             "TCGA BRCA ATAC (n=62)",
             "TCGA BRCA ATAC (n=62)",
             "1000 Genomes (n=3,202)",
             "1000 Genomes (n=3,202)",
-            "GDC (n=16,007)",
-            "GDC (n=16,007)",
             "Biobank, chr22 (n=487,409)",
             "Biobank, chr22 (n=487,409)",
         ],
-        "Implementation": ["GVL", "FASTA"] * 4,
+        "Implementation": ["GVL", "FASTA"] * 3,
         "Disk Space (GB)": [
             0.173,
             compressed_hg37 * 62 * 2,
             3.1,
             compressed_hg37 * 3202 * 2,
-            7.9,
-            compressed_hg38 * 16007,
             30,
             0.0096 * 487409 * 2,  # just chr22
         ],
