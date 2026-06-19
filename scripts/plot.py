@@ -14,14 +14,15 @@ data_dir = proj_dir / "results"
 fig_dir = proj_dir / "figures"
 fig_dir.mkdir(parents=True, exist_ok=True)
 
-# The best-performance summary figures use the GVL 0.27.0 eager (mode=none)
-# full bench in results_gvl027/ (artifact-free per-batch decode; see CLAUDE.md).
-# FASTA/BigWig baselines are reused from the 0.6.1 manuscript CSVs (they are
-# independent of the GVL version). The horizontal reference is cn-03's max
-# sustained RAM bandwidth (STREAM Triad ~35 GB/s) — the real throughput ceiling
-# on this hardware — replacing the old A100 CPU->GPU PCIe line. The full-grid
-# hap_throughput/track_throughput figures below remain on the 0.6.1 data + the
-# 31.5 GB/s A100 line (the pinned manuscript numbers).
+# ALL throughput figures are now on the GVL 0.27.0 eager (mode=none) full bench in
+# results_gvl027/ (artifact-free per-batch decode; see CLAUDE.md): the Fig 2C/2D
+# best-performance summaries AND the full-grid Supp. Fig. 1A/B
+# (hap_throughput/track_throughput). FASTA/BigWig baselines are the
+# apples-to-apples re-measurements on the SAME hardware (cn-03) as the 0.27 grid,
+# in results_gvl027/baselines/ — NOT the old 0.6.1-era results/ CSVs (different
+# hardware). The horizontal reference in every panel is cn-03's max sustained RAM
+# bandwidth (STREAM Triad ~35 GB/s) — the real throughput ceiling on this
+# hardware — replacing the old 31.5 GB/s A100 CPU->GPU PCIe line.
 RAM_BW_GBPS = 35.0
 RAM_BW_LABEL = "cn-03 max RAM\nbandwidth"
 GVL027_LABELS = {
@@ -48,44 +49,43 @@ def gvl027_peak(result_glob: str) -> pl.DataFrame:
         .sort("dataset", "seqlen")
     )
 
-# %% hap data
-results = pl.read_csv(data_dir / "hap_results.csv").with_columns(
-    n_nucleotides=pl.col("seqlen") * pl.col("batch_size"),
-    throughput=pl.col("throughput (MiB/s)") * 2**20 / 1e9,  # GB/s
-)
-ref_results = (
-    pl.read_csv(data_dir / "ref_results.csv")
-    .with_columns(
+
+def gvl027_grid(result_glob: str) -> pl.DataFrame:
+    """Per-cell eager (mode=none) throughput grid, GB/s, with n_nucleotides."""
+    files = sorted(glob.glob(str(proj_dir / result_glob)))
+    if not files:
+        raise FileNotFoundError(f"no GVL 0.27.0 result CSVs matched {result_glob!r}")
+    df = pl.concat([pl.read_csv(c) for c in files], how="vertical_relaxed").with_columns(
+        pl.col("throughput (MiB/s)").cast(pl.Float64, strict=False)
+    )
+    df = df.filter(
+        pl.col("throughput (MiB/s)").is_finite() & (pl.col("throughput (MiB/s)") > 0)
+    )
+    return df.with_columns(
         n_nucleotides=pl.col("seqlen") * pl.col("batch_size"),
         throughput=pl.col("throughput (MiB/s)") * 2**20 / 1e9,  # GB/s
     )
+
+# %% hap data (GVL 0.27.0 eager grid + same-HW FASTA baseline)
+results = gvl027_grid("results_gvl027/haps/*_none.csv")
+ref_results = (
+    gvl027_grid("results_gvl027/baselines/fasta.csv")
     .group_by("seqlen")
     .agg(pl.col("throughput").max())
 )
 results = results.join(
     ref_results.select("seqlen", ref_throughput="throughput"), on=["seqlen"]
 ).with_columns(
-    pl.col("dataset").replace({
-        "tcga-atac": "GVL: TCGA BRCA ATAC (n=62)",
-        "1kgp": "GVL: 1000 Genomes (n=3,202)",
-        "ukbb": "GVL: Biobank (n=487,409)",
-    }),
+    pl.col("dataset").replace(GVL027_LABELS),
     batch_mb=pl.col("batch_size") * pl.col("seqlen") / 1e6,
 )
 
-# %% track data
-track_results = pl.read_csv(data_dir / "track_results.csv").with_columns(
-    n_nucleotides=pl.col("seqlen") * pl.col("batch_size"),
+# %% track data (GVL 0.27.0 eager grid + same-HW pyBigWig baseline)
+track_results = gvl027_grid("results_gvl027/tracks/*_none.csv").with_columns(
     batch_mb=pl.col("batch_size") * pl.col("seqlen") * 4 / 1e6,
-    throughput=pl.col("throughput (MiB/s)") * 2**20 / 1e9,  # GB/s
 )
 pybigwig_results = (
-    pl.read_csv(data_dir / "pybigwig_results.csv")
-    .with_columns(
-        n_nucleotides=pl.col("seqlen") * pl.col("batch_size"),
-        batch_mb=pl.col("batch_size") * pl.col("seqlen") * 4 / 1e6,
-        throughput=pl.col("throughput (MiB/s)") * 2**20 / 1e9,  # GB/s
-    )
+    gvl027_grid("results_gvl027/baselines/pybigwig.csv")
     .group_by("seqlen")
     .agg(pl.col("throughput").max())
 )
@@ -126,7 +126,7 @@ fg.set(
 )
 ax = fg.axes[0, 0]
 ax.axhline(
-    31.5,
+    RAM_BW_GBPS,
     c="k",
     ls="--",
     alpha=0.5,
@@ -134,8 +134,8 @@ ax.axhline(
 )
 ax.text(
     results["n_nucleotides"].min() - 1500,  # pyright: ignore
-    31.5,
-    r"A100 CPU$\rightarrow$GPU" + "\ntransfer limit",
+    RAM_BW_GBPS,
+    RAM_BW_LABEL,
     va="center",
     ha="right",
 )
@@ -175,7 +175,7 @@ fg.set(
 )
 ax = fg.axes[0, 0]
 ax.axhline(
-    31.5,
+    RAM_BW_GBPS,
     c="k",
     ls="--",
     alpha=0.5,
@@ -183,8 +183,8 @@ ax.axhline(
 )
 ax.text(
     track_results["n_nucleotides"].min() - 3000,  # pyright: ignore
-    31.5,
-    r"A100 CPU$\rightarrow$GPU" + "\ntransfer limit",
+    RAM_BW_GBPS,
+    RAM_BW_LABEL,
     va="center",
     ha="right",
 )
@@ -193,7 +193,8 @@ fg.savefig(fig_dir / "track_throughput.svg")
 fg.savefig(fig_dir / "track_throughput.png", dpi=150)
 
 # %%
-# best track results (GVL 0.27.0 eager vs 0.6.1 BigWig baseline; RAM-bw ceiling)
+# best track results (GVL 0.27.0 eager vs same-HW pyBigWig baseline; RAM-bw ceiling)
+gvl027_bigwig = gvl027_peak("results_gvl027/baselines/pybigwig.csv").sort("seqlen")
 fig, ax = plt.subplots()
 sns.lineplot(
     data=gvl027_peak("results_gvl027/tracks/*_none.csv").sort("seqlen").to_pandas(),
@@ -206,7 +207,7 @@ sns.lineplot(
     solid_capstyle="round",
 )
 sns.lineplot(
-    data=pybigwig_results.to_pandas(),
+    data=gvl027_bigwig.to_pandas(),
     x="seqlen",
     y="throughput",
     ax=ax,
@@ -218,7 +219,7 @@ sns.lineplot(
 )
 ax.axhline(RAM_BW_GBPS, c="k", ls="--", alpha=0.5, linewidth=5)
 ax.text(
-    pybigwig_results["seqlen"].min() - 1000,  # pyright: ignore
+    gvl027_bigwig["seqlen"].min() - 1000,  # pyright: ignore
     RAM_BW_GBPS,
     RAM_BW_LABEL,
     va="center",
@@ -234,12 +235,13 @@ plt.tight_layout()
 plt.savefig(fig_dir / "best_track_performance.png", dpi=300)
 plt.savefig(fig_dir / "best_track_performance.svg")
 
-# %% best haplotype performance (GVL 0.27.0 eager vs 0.6.1 FASTA baseline; RAM-bw ceiling)
+# %% best haplotype performance (GVL 0.27.0 eager vs same-HW FASTA baseline; RAM-bw ceiling)
 gvl_haps = gvl027_peak("results_gvl027/haps/*_none.csv").with_columns(
     pl.col("dataset").replace(GVL027_LABELS)
 )
+gvl027_fasta = gvl027_peak("results_gvl027/baselines/fasta.csv")  # dataset == "FASTA"
 data = pl.concat(
-    [gvl_haps, ref_results.with_columns(dataset=pl.lit("FASTA"))],
+    [gvl_haps, gvl027_fasta],
     how="diagonal_relaxed",
 ).rename({"dataset": "Dataset"})
 
@@ -263,7 +265,7 @@ fg = sns.relplot(
 ax = fg.ax
 ax.axhline(RAM_BW_GBPS, c="k", ls="--", alpha=0.5, linewidth=3)
 ax.text(
-    ref_results["seqlen"].min() - 1000,  # pyright: ignore
+    gvl027_fasta["seqlen"].min() - 1000,  # pyright: ignore
     RAM_BW_GBPS,
     RAM_BW_LABEL,
     va="center",
