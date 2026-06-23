@@ -13,7 +13,7 @@ import polars as pl
 proj_dir = Path(__file__).resolve().parent.parent
 
 RAM_BW_GBPS = 35.0
-RAM_BW_LABEL = "cn-03 max RAM\nbandwidth"
+RAM_BW_LABEL = "RAM\nbandwidth"
 GVL027_LABELS = {
     "TCGA_ATAC": "GVL: TCGA BRCA ATAC (n=62)",
     "1KGP": "GVL: 1000 Genomes (n=3,202)",

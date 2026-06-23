@@ -74,6 +74,7 @@ def main(
 
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt  # noqa: F401  (imported for side effects / future use)
+    import matplotlib.lines as mlines
     import polars as pl
     import seaborn as sns
 
@@ -282,9 +283,14 @@ def main(
                 rss_gib=pl.col("rss_bytes") / 2**30,
                 inst_decoded_m=(pl.col("elapsed_ns") / 1e9 * pl.col("inst_rate")) / 1e6,
             ).to_pandas()
+            # Map raw keys to display names for the legend.
+            DATASET_LABELS = {"1kgp": "1000 Genomes", "tcga-atac": "TCGA ATAC"}
+            MODE_LABELS = {"haps": "Haplotypes", "tracks": "Tracks"}
+            mpdf["Dataset"] = mpdf["dataset_norm"].map(DATASET_LABELS).fillna(mpdf["dataset_norm"])
+            mpdf["Mode"] = mpdf["mode"].map(MODE_LABELS).fillna(mpdf["mode"])
             # Fixed hue order + palette so reference lines can be colored to match
             # their dataset's curve.
-            hue_order = sorted(mpdf["dataset_norm"].unique())
+            hue_order = sorted(mpdf["Dataset"].unique())
             palette = dict(zip(hue_order, sns.color_palette(n_colors=len(hue_order))))
             # x = instances decoded if we have rates for every curve, else fall
             # back to wall-clock so the figure still renders.
@@ -292,7 +298,7 @@ def main(
             x_label = "instances decoded (M)" if x_col == "inst_decoded_m" else "elapsed (s)"
             sns.set_context("notebook", font_scale=2.0)  # 2x larger fonts
             g = sns.relplot(
-                data=mpdf, x=x_col, y="rss_gib", hue="dataset_norm", style="mode",
+                data=mpdf, x=x_col, y="rss_gib", hue="Dataset", style="Mode",
                 hue_order=hue_order, palette=palette,
                 col="seqlen", col_wrap=2, kind="line", estimator=None,
                 linewidth=1,
@@ -300,15 +306,22 @@ def main(
             )
             g.set_axis_labels(x_label, "RSS (GiB)")
             for ax in g.axes.flat:
-                # Only reference line kept: the 96 GiB job request. RSS climbs
-                # above it because the excess is reclaimable file-backed mmap page
-                # cache, not anonymous heap.
+                # Only reference line kept: the 96 GiB job request (allocated RAM).
+                # RSS climbs above it because the excess is reclaimable file-backed
+                # mmap page cache, not anonymous heap.
                 ax.axhline(JOB_MEM_GIB, c="r", ls=":", lw=2.5, alpha=0.8)
-                ax.text(
-                    ax.get_xlim()[0], JOB_MEM_GIB, "96 GiB --mem",
-                    c="r", fontsize=12, va="bottom", ha="left", alpha=0.9,
-                )
             g.tight_layout()
+            # Append the allocated-RAM reference line to the legend, set off from
+            # the Dataset/Mode entries by a blank spacer row.
+            if g._legend is not None:
+                handles = list(g._legend.legend_handles)
+                labels = [t.get_text() for t in g._legend.texts]
+                spacer = mlines.Line2D([], [], color="none")
+                ram_line = mlines.Line2D([], [], color="r", ls=":", lw=2.5, alpha=0.8)
+                handles += [spacer, ram_line]
+                labels += ["", "Alloc. RAM"]
+                g._legend.remove()
+                g.figure.legend(handles, labels, loc="center right", frameon=False)
             for ext in ("png", "svg"):
                 out = fig_dir / f"gvl027_mem_growth.{ext}"
                 g.savefig(out, dpi=150, bbox_inches="tight")

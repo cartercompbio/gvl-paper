@@ -101,15 +101,15 @@ ax.axhline(
     linewidth=3,
 )
 ax.text(
-    results["n_nucleotides"].min() - 1500,  # pyright: ignore
+    results["n_nucleotides"].min() / 4,  # pyright: ignore
     RAM_BW_GBPS,
     RAM_BW_LABEL,
     va="center",
     ha="right",
 )
 fg.tight_layout()
-fg.savefig(fig_dir / "hap_throughput.svg")
-fg.savefig(fig_dir / "hap_throughput.png", dpi=150)
+fg.savefig(fig_dir / "hap_throughput.svg", bbox_inches="tight")
+fg.savefig(fig_dir / "hap_throughput.png", dpi=150, bbox_inches="tight")
 
 # %%
 fg = sns.relplot(
@@ -150,15 +150,15 @@ ax.axhline(
     linewidth=3,
 )
 ax.text(
-    track_results["n_nucleotides"].min() - 3000,  # pyright: ignore
+    track_results["n_nucleotides"].min() / 4,  # pyright: ignore
     RAM_BW_GBPS,
     RAM_BW_LABEL,
     va="center",
     ha="right",
 )
 fg.tight_layout()
-fg.savefig(fig_dir / "track_throughput.svg")
-fg.savefig(fig_dir / "track_throughput.png", dpi=150)
+fg.savefig(fig_dir / "track_throughput.svg", bbox_inches="tight")
+fg.savefig(fig_dir / "track_throughput.png", dpi=150, bbox_inches="tight")
 
 # %%
 # best track results (GVL 0.27.0 eager vs same-HW pyBigWig baseline; RAM-bw ceiling)
