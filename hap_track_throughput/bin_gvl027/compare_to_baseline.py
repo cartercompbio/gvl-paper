@@ -81,11 +81,15 @@ def main(
     results_dir.mkdir(exist_ok=True)
     fig_dir.mkdir(exist_ok=True)
 
-    # ---------- throughput ----------
+    # ---------- throughput (INTERNAL parity check vs the 0.6.1 baseline) ----------
+    # This block exists solely for the v027-vs-v061 sanity check and is not a paper
+    # deliverable. The 0.6.1 baseline CSVs were removed from the repo (the manuscript
+    # was re-based onto 0.27); when they are absent, skip parity and go straight to
+    # the memory-growth figure (Supp Fig 2), which needs only results_gvl027/.
     tput_frames = [
         f for f in (_load_dir(results_dir, d) for d in ("haps", "tracks")) if f is not None
     ]
-    if tput_frames:
+    if tput_frames and hap_baseline.exists() and track_baseline.exists():
         tput = pl.concat(tput_frames, how="vertical_relaxed").rename(
             {"throughput (MiB/s)": "v027"}
         )
@@ -144,7 +148,10 @@ def main(
             g.savefig(fig_dir / "gvl027_parity.png", dpi=150, bbox_inches="tight")
             print(f"WROTE {fig_dir / 'gvl027_parity.png'}")
     else:
-        print("No throughput CSVs found under haps/ or tracks/ — skipping throughput report.")
+        print(
+            "Skipping internal v027-vs-v061 parity check "
+            "(no throughput CSVs under haps/ or tracks/, or 0.6.1 baseline CSVs absent)."
+        )
 
     # ---------- memory (RSS-vs-time growth) ----------
     # The memory pass emits one row per RSS sample (schema: ...,elapsed_ns,

@@ -8,18 +8,20 @@ Benchmarks, training code, and figures for the GenVarLoader (GVL) manuscript. GV
 
 ## Environment
 
-Managed with **pixi** (not conda/pip directly). Two environments are defined in `pixi.toml`:
+Managed with **pixi** (not conda/pip directly). Several environments are defined in `pixi.toml`:
 
-> **The manuscript throughput numbers are now based on GVL 0.27** (`results_gvl027/`), re-based
+> **The manuscript throughput numbers are based on GVL 0.27** (`results_gvl027/`), re-based
 > from 0.6.1 for correctness (decision 2026-06-17, re-bench completed 2026-06-18). See the
 > *GenVarLoader version sensitivity* section below. `scripts/plot.py` reads `results_gvl027/` for
-> all four throughput figures; the old `results/{hap,track,ref,pybigwig}_results.csv` (0.6.1) are
-> deprecated and kept only for provenance.
+> the throughput figures. The original 0.6.1 results (`results/`, `results_gvl061/`) and 0.6.1-API
+> scripts (`hap_track_throughput/bin_gvl061/`) were **removed from the repo** (2026-06-23) once the
+> paper was fully re-based onto 0.27; they remain in git history if ever needed. The `bench061`
+> pixi env is now unused.
 
 - `default` / `bench`: Python 3.12, torch 2.10 (cu126), `genvarloader >=0.24.1,<0.25`. Used for current work and most plotting (`scripts/plot.py` reads CSVs and does **not** import GVL).
 - `basenji2`: Python 3.12, torch 2.6 (cu126), `genvarloader ==0.20.0`, `basenji2-pytorch`. Used only for the Basenji2 evaluation notebook/script — pinned to an older GVL on purpose.
 - `bench027`: Python 3.12, CPU torch, `genvarloader ==0.27.0`. **The version the manuscript throughput + memory numbers are now collected on** (`results_gvl027/`), via the production Nextflow harness `hap_track_throughput/benchmark.nf -profile gvl027`. See the version-sensitivity section for the full protocol.
-- `bench061`: Python 3.12, CPU torch, `genvarloader ==0.6.1`. The version the *original* (now superseded) manuscript throughput benchmarks (`results/{hap,track}_results.csv`) were collected on. GVL ≥0.21 regressed haplotype/track dataloading ~10–30× in throughput and several-fold in peak RAM (see `../GenVarLoader/REGRESSIONS.md`); the paper accepts 0.27's lower throughput as the cost of correctness. Kept for provenance with the 0.6.1-API scripts in `hap_track_throughput/bin_gvl061/`. Do **not** use these CSVs for the manuscript anymore.
+- `bench061`: Python 3.12, CPU torch, `genvarloader ==0.6.1`. The version the *original* (now superseded) manuscript throughput benchmarks were collected on. GVL ≥0.21 regressed haplotype/track dataloading ~10–30× in throughput and several-fold in peak RAM (see `../GenVarLoader/REGRESSIONS.md`); the paper accepts 0.27's lower throughput as the cost of correctness. **The 0.6.1 results and 0.6.1-API scripts (`results/`, `results_gvl061/`, `hap_track_throughput/bin_gvl061/`) were removed (2026-06-23); this env is retained in `pixi.toml` only for historical re-runs from git history.**
 
 Run anything in an env with `pixi run -e <env> <cmd>` (default env is implicit). Example: `pixi r scripts/plot.py`. Register Jupyter kernels via the `i-kernel` task in each feature.
 
@@ -27,18 +29,18 @@ Run anything in an env with `pixi run -e <env> <cmd>` (default env is implicit).
 
 ## Repo layout (big picture)
 
-- `throughput/` — the main benchmark harness.
-  - `benchmark.nf` is a Nextflow DSL2 pipeline that builds GVL datasets at several sequence lengths and runs haplotype / track benchmarks across a grid of (threads, batch_size). Datasets are configured via `configs/{1kgp,gdc,tcga-atac,ukbb}.config`.
-  - `bin/` contains the scripts the pipeline invokes (`make_bed.py`, `benchmark_haps.py`, `benchmark_tracks.py`, `benchmark_ref.py`, `benchmark_bigwig.py`, `make_launch_grid.py`). Nextflow places `bin/` on PATH automatically.
-  - `launch_benchmarks.py` / `launch_ref_benchmarks.py` / `launch_bigwig_benchmarks.py` drive SLURM submissions outside Nextflow; they hardcode partitions/nodes and must be edited for other clusters.
-  - `bench_gvl_vcf_plink.py` is the variant-throughput comparison against raw VCF/PLINK.
-  - Results land in `results/` and are consumed by notebooks + `scripts/plot.py`.
+- `hap_track_throughput/` — the haplotype/track benchmark harness (the manuscript 0.27 numbers).
+  - `benchmark.nf` is a Nextflow DSL2 pipeline that builds GVL datasets at several sequence lengths and runs haplotype / track benchmarks across a grid of (threads, batch_size). Datasets are configured via `configs/{1kgp,gdc,tcga-atac,ukbb}.config` (gitignored).
+  - `bin/` contains the scripts the pipeline invokes (`make_bed.py`, `benchmark_haps.py`, `benchmark_tracks.py`, `benchmark_ref.py`, `benchmark_bigwig.py`, `benchmark_svar_convert.py`, `make_launch_grid.py`). Nextflow places `bin/` on PATH automatically.
+  - `bin/launch_benchmarks.py` / `launch_ref_benchmarks.py` / `launch_bigwig_benchmarks.py` drive SLURM submissions outside Nextflow; they hardcode partitions/nodes and must be edited for other clusters. `run_*.sbatch` drive the full bench + baselines.
+  - `bin_gvl027/compare_to_baseline.py` + `plot_convert_memory.py` turn the harness output into Supp Figs 2–3.
+  - `bench_svar_vcf_plink.py` is a variant-throughput comparison against raw VCF/PLINK.
+  - Results land in `results_gvl027/` (top level) and are consumed by `scripts/`.
+- `variant_throughput/` — the variant random-access benchmark (genoray SVAR/BCF/PGEN/pre-subset-BCF); feeds Fig 2B and Supp Fig 4 via `scripts/plot_variant_throughput_panel.py`.
 - `gpu_utilization/` — BPNet training run used to measure GPU utilization. `train_BPNet.py` ties together `arch.BPNetHaps`, `dataloader.ATACDataModule`, and `metrics.{bpnetlite_loss,bpnetlite_metrics}` via PyTorch Lightning + WandB. **Note the warning at the top of `train_BPNet.py`**: BPNet metrics require removing the `.squeeze()` calls from `seqmodels.Module` — this is an unpatched upstream issue.
 - `basenji2/` — Basenji2 reproduction. Inference happens in `basenji2-eval-hg19.ipynb` (uses the `basenji2` pixi env); predictions are cached at `basenji2/data/preds_hg19.npy` and turned into figures by `scripts/plot_basenji2.py`.
-- `borzoi/` — Borzoi evaluation notebook (`borzoi-eval.ipynb`).
-- `notebooks/` — throughput analysis (`hap_and_track_throughput.ipynb`, `variant_throughput.ipynb`).
-- `scripts/plot.py` is the canonical figure-generation entry point for everything except Basenji2.
-- `figures/`, `results/`, `data/` — outputs/inputs, mostly gitignored or controlled-access.
+- `scripts/` — figure generation. `plot_figure2.py` (Fig 2), `make_supp_fig1.py` (Supp Fig 1), `plot_variant_throughput_panel.py` (Supp Fig 4), `plot.py` (throughput/storage panels), `plot_basenji2.py` (Fig 2F), `_fig_data.py` (shared loaders).
+- `figures/`, `results_gvl027/`, `data/` — outputs/inputs, mostly gitignored or controlled-access.
 
 ## Common commands
 
@@ -54,7 +56,7 @@ pixi r scripts/plot.py
 pixi r scripts/plot_basenji2.py basenji2/gene_list.csv ... basenji2/data/preds_hg19.npy
 
 # Run the throughput pipeline for a dataset (edit/select a config first):
-cd throughput && nextflow run benchmark.nf -c configs/1kgp.config
+cd hap_track_throughput && nextflow run benchmark.nf -profile gvl027 -c configs/1kgp.config
 
 # BPNet training (single run):
 pixi r python gpu_utilization/train_BPNet.py
@@ -62,11 +64,12 @@ pixi r python gpu_utilization/train_BPNet.py
 
 ## 1kGP benchmark reproduction
 
-Per `README.md`: download the Zenodo tarballs into `throughput/datasets/1kgp/`, drop the GRCh38 1000G reference FASTA into `throughput/`, and edit SLURM specifics in `throughput/launch_benchmarks.py` (queue names, node availability) before running.
+Per `README.md`: download the Zenodo tarballs into `hap_track_throughput/datasets/1kgp/`, drop the GRCh38 1000G reference FASTA into `hap_track_throughput/`, and edit SLURM specifics in `hap_track_throughput/bin/launch_benchmarks.py` (queue names, node availability) before running.
 
 ## GenVarLoader version sensitivity
 
-GVL's API and performance both shifted across releases, so the env is split four ways:
+GVL's API and performance both shifted across releases, so the env is split four ways (the
+`bench061` env is retained but its results/scripts were removed — see below):
 
 **Source of truth: the manuscript throughput + memory numbers are GVL 0.27 (`results_gvl027/`).**
 0.6.1 (the original benchmark version) had correctness bugs fixed in 0.27, so the paper was
@@ -78,7 +81,7 @@ ratios in `results_gvl027/speedups.csv` (haplotypes 7.8–16.8× vs FASTA, track
 pyBigWig; no cell reaches A100 PCIe bandwidth).
 
 - `feature.basenji2` → `genvarloader ==0.20.0`: don't bump it — the cached `preds_hg19.npy` and `basenji2-eval-hg19.ipynb` target the 0.20 API.
-- `feature.bench061` → `genvarloader ==0.6.1`: the version the *original* manuscript throughput results were measured on, **now superseded by 0.27**. **GVL ≥0.21 regressed dataloading throughput ~10–30× and peak RAM several-fold** (root cause not yet found upstream; documented in `../GenVarLoader/REGRESSIONS.md`). `results/{hap,track}_results.csv` and the `hap_track_throughput/bin_gvl061/` scripts are kept for provenance only; do **not** use them for the manuscript.
+- `feature.bench061` → `genvarloader ==0.6.1`: the version the *original* manuscript throughput results were measured on, **now superseded by 0.27**. **GVL ≥0.21 regressed dataloading throughput ~10–30× and peak RAM several-fold** (root cause not yet found upstream; documented in `../GenVarLoader/REGRESSIONS.md`). The 0.6.1 results (`results/`, `results_gvl061/`) and 0.6.1-API scripts (`hap_track_throughput/bin_gvl061/`) were **removed from the working tree (2026-06-23)**; recover from git history if a re-run is ever needed.
 - `feature.bench` (default) → `genvarloader >=0.24.1`: current/general work and plotting (`scripts/plot.py`, which reads CSVs and does not import GVL). **Not** for regenerating benchmark numbers.
 - `feature.bench027` → `genvarloader ==0.27.0`: **the manuscript throughput + memory source of truth** (bumped from 0.26.0 — see below). The full grid is run through the production Nextflow harness `hap_track_throughput/benchmark.nf -profile gvl027`; outputs land in `results_gvl027/` and feed all four throughput figures in `scripts/plot.py`. (It began as a parity probe vs the 0.6.1 baseline in `hap_track_throughput/bin_gvl027/`; that comparison is now an internal sanity check.) CPU torch (no GPU workload).
   **Why 0.27.0:** 0.26.0's `buffered` dataloader forced `drop_last=True`, so a cell with
@@ -112,9 +115,11 @@ pyBigWig; no cell reaches A100 PCIe bandwidth).
   n_batches_measured,total_bytes,duration_ns,throughput (MiB/s)` (memory pass:
   `...,avg_rss_bytes,peak_rss_bytes`), directly comparable to the 0.6.1 baseline.
   Drive the whole thing with `hap_track_throughput/run_full_bench.sbatch`; outputs
-  land in `results_gvl027/{haps,tracks,haps_memory,tracks_memory,...}` and are joined
-  to the baseline by `bin_gvl027/compare_to_baseline.py`. The throughput-vs-0.6.1
-  ratio is an **internal sanity check**; memory is reported as 0.27.0 absolute (no
-  0.6.1 memory baseline exists). The reported speedups instead come from the
-  same-hardware FASTA/pyBigWig re-bench in `results_gvl027/baselines/` (see the
-  source-of-truth note above and `results_gvl027/speedups.csv`).
+  land in `results_gvl027/{haps,tracks,haps_memory,tracks_memory,...}` and are turned
+  into Supp Figs 2–3 by `bin_gvl027/compare_to_baseline.py` (memory growth) and
+  `plot_convert_memory.py` (conversion RSS). The throughput-vs-0.6.1 parity branch
+  in `compare_to_baseline.py` is now an **inert internal sanity check** — it self-skips
+  because the 0.6.1 baseline CSVs were removed; memory is reported as 0.27.0 absolute.
+  The reported speedups instead come from the same-hardware FASTA/pyBigWig re-bench in
+  `results_gvl027/baselines/` (see the source-of-truth note above and
+  `results_gvl027/speedups.csv`).
