@@ -16,12 +16,12 @@ Managed with **pixi** (not conda/pip directly). Several environments are defined
 > the throughput figures. The original 0.6.1 results (`results/`, `results_gvl061/`) and 0.6.1-API
 > scripts (`hap_track_throughput/bin_gvl061/`) were **removed from the repo** (2026-06-23) once the
 > paper was fully re-based onto 0.27; they remain in git history if ever needed. The `bench061`
-> pixi env is now unused.
+> pixi env (genvarloader 0.6.1) was removed from `pixi.toml` in the same cleanup.
 
 - `default` / `bench`: Python 3.12, torch 2.10 (cu126), `genvarloader >=0.24.1,<0.25`. Used for current work and most plotting (`scripts/plot.py` reads CSVs and does **not** import GVL).
 - `basenji2`: Python 3.12, torch 2.6 (cu126), `genvarloader ==0.20.0`, `basenji2-pytorch`. Used only for the Basenji2 evaluation notebook/script — pinned to an older GVL on purpose.
 - `bench027`: Python 3.12, CPU torch, `genvarloader ==0.27.0`. **The version the manuscript throughput + memory numbers are now collected on** (`results_gvl027/`), via the production Nextflow harness `hap_track_throughput/benchmark.nf -profile gvl027`. See the version-sensitivity section for the full protocol.
-- `bench061`: Python 3.12, CPU torch, `genvarloader ==0.6.1`. The version the *original* (now superseded) manuscript throughput benchmarks were collected on. GVL ≥0.21 regressed haplotype/track dataloading ~10–30× in throughput and several-fold in peak RAM (see `../GenVarLoader/REGRESSIONS.md`); the paper accepts 0.27's lower throughput as the cost of correctness. **The 0.6.1 results and 0.6.1-API scripts (`results/`, `results_gvl061/`, `hap_track_throughput/bin_gvl061/`) were removed (2026-06-23); this env is retained in `pixi.toml` only for historical re-runs from git history.**
+- *(removed 2026-06-23)* `bench061` / `genvarloader ==0.6.1` — the env the *original* (now superseded) manuscript throughput benchmarks were collected on. GVL ≥0.21 regressed haplotype/track dataloading ~10–30× in throughput and several-fold in peak RAM (see `../GenVarLoader/REGRESSIONS.md`); the paper accepts 0.27's lower throughput as the cost of correctness. The env definition, the 0.6.1 results (`results/`, `results_gvl061/`), and the 0.6.1-API scripts (`hap_track_throughput/bin_gvl061/`) were all removed once the paper was re-based onto 0.27. Recover from git history if a re-run is ever needed.
 
 Run anything in an env with `pixi run -e <env> <cmd>` (default env is implicit). Example: `pixi r scripts/plot.py`. Register Jupyter kernels via the `i-kernel` task in each feature.
 
@@ -68,8 +68,8 @@ Per `README.md`: download the Zenodo tarballs into `hap_track_throughput/dataset
 
 ## GenVarLoader version sensitivity
 
-GVL's API and performance both shifted across releases, so the env is split four ways (the
-`bench061` env is retained but its results/scripts were removed — see below):
+GVL's API and performance both shifted across releases, so the env is split three ways (the
+fourth, `bench061` / 0.6.1, was removed in the 2026-06-23 cleanup — see below):
 
 **Source of truth: the manuscript throughput + memory numbers are GVL 0.27 (`results_gvl027/`).**
 0.6.1 (the original benchmark version) had correctness bugs fixed in 0.27, so the paper was
@@ -81,7 +81,7 @@ ratios in `results_gvl027/speedups.csv` (haplotypes 7.8–16.8× vs FASTA, track
 pyBigWig; no cell reaches A100 PCIe bandwidth).
 
 - `feature.basenji2` → `genvarloader ==0.20.0`: don't bump it — the cached `preds_hg19.npy` and `basenji2-eval-hg19.ipynb` target the 0.20 API.
-- `feature.bench061` → `genvarloader ==0.6.1`: the version the *original* manuscript throughput results were measured on, **now superseded by 0.27**. **GVL ≥0.21 regressed dataloading throughput ~10–30× and peak RAM several-fold** (root cause not yet found upstream; documented in `../GenVarLoader/REGRESSIONS.md`). The 0.6.1 results (`results/`, `results_gvl061/`) and 0.6.1-API scripts (`hap_track_throughput/bin_gvl061/`) were **removed from the working tree (2026-06-23)**; recover from git history if a re-run is ever needed.
+- *(removed 2026-06-23)* `feature.bench061` → `genvarloader ==0.6.1`: the version the *original* manuscript throughput results were measured on, **now superseded by 0.27**. **GVL ≥0.21 regressed dataloading throughput ~10–30× and peak RAM several-fold** (root cause not yet found upstream; documented in `../GenVarLoader/REGRESSIONS.md`). The env definition (`pixi.toml`), the 0.6.1 results (`results/`, `results_gvl061/`), and the 0.6.1-API scripts (`hap_track_throughput/bin_gvl061/`) were all removed from the working tree; recover from git history if a re-run is ever needed.
 - `feature.bench` (default) → `genvarloader >=0.24.1`: current/general work and plotting (`scripts/plot.py`, which reads CSVs and does not import GVL). **Not** for regenerating benchmark numbers.
 - `feature.bench027` → `genvarloader ==0.27.0`: **the manuscript throughput + memory source of truth** (bumped from 0.26.0 — see below). The full grid is run through the production Nextflow harness `hap_track_throughput/benchmark.nf -profile gvl027`; outputs land in `results_gvl027/` and feed all four throughput figures in `scripts/plot.py`. (It began as a parity probe vs the 0.6.1 baseline in `hap_track_throughput/bin_gvl027/`; that comparison is now an internal sanity check.) CPU torch (no GPU workload).
   **Why 0.27.0:** 0.26.0's `buffered` dataloader forced `drop_last=True`, so a cell with
