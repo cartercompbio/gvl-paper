@@ -2,6 +2,7 @@ from pathlib import Path
 
 METHOD_LABELS = {
     "svar": "SVAR",
+    "svar2": "SVAR2",
     "bcf": "BCF",
     "pgen": "PGEN",
     "presubset_bcf": "PRESUB-BCF",

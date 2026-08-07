@@ -8,7 +8,21 @@ than letting the benchmark silently measure something else.
 
 import numpy as np
 import pytest
-from genoray import SparseVar2
+
+# genoray's SparseVar2 (and its private batch-query API) needs genoray>=3.4,
+# which lives only in the isolated `svar2` pixi env -- the shared `bench`/
+# default env stays pinned to genoray==2.9.0 (see pixi.toml). Skip cleanly
+# rather than erroring at collection so `pixi run pytest variant_throughput/
+# bin/tests/` still collects the rest of the suite under the default env; run
+# this file for real with `pixi run -e svar2 pytest ...`.
+genoray = pytest.importorskip("genoray")
+SparseVar2 = getattr(genoray, "SparseVar2", None)
+if SparseVar2 is None:
+    pytest.skip(
+        "genoray.SparseVar2 unavailable (genoray<3.4) -- run with "
+        "`pixi run -e svar2 pytest variant_throughput/bin/tests/test_bench_svar2.py`",
+        allow_module_level=True,
+    )
 
 
 def test_private_split_methods_exist(svar2_store):

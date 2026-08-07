@@ -6,6 +6,7 @@ params {
     dataset: String
 
     svar: Path
+    svar2: Path
     bcf: Path
     pgen: Path
     fai: Path
@@ -47,6 +48,7 @@ workflow {
             n_samples: r.n_samples,
             pairs: r.pairs,
             svar: params.svar,
+            svar2: params.svar2,
             bcf: params.bcf,
             bcf_csi: bcf_csi_path,
             pgen: params.pgen,
@@ -73,25 +75,33 @@ workflow {
         subset_pgen_out.map { r -> r.pvar },
         subset_pgen_out.map { r -> r.psam },
     )
+    svar2_out = BUILD_SVAR2_FROM_PGEN(
+        subset_pgen_out.map { r -> r.n },
+        subset_pgen_out.map { r -> r.pgen },
+        subset_pgen_out.map { r -> r.pvar },
+        subset_pgen_out.map { r -> r.psam },
+    )
 
-    triples = svar_out
+    subset_stores = svar_out
         .map { r -> tuple(r.n, r.svar) }
+        .join(svar2_out.map { r -> tuple(r.n, r.svar2) }, by: 0)
         .join(subset_bcf_out.map { r -> tuple(r.n, r.bcf, r.csi) }, by: 0)
         .join(subset_pgen_out.map { r -> tuple(r.n, r.pgen, r.pvar, r.psam) }, by: 0)
-        .map { n, svar, bcf, csi, pgen, pvar, psam ->
+        .map { n, svar, svar2, bcf, csi, pgen, pvar, psam ->
             record(
                 n: n,
                 svar: svar,
+                svar2: svar2,
                 bcf: bcf,
                 bcf_csi: csi,
                 pgen: pgen,
                 pvar: pvar,
                 psam: psam,
-            ) as SubsetTriple
+            ) as SubsetStores
         }
 
     n_pairs = GENERATE_PAIRS_N(
-        triples,
+        subset_stores,
         params.n_sweep_query_length,
         params.n_replicates,
         params.stream_batches,
@@ -103,17 +113,20 @@ workflow {
 
     // Throughput track
     svar_t = BENCH_SVAR_THROUGHPUT(all_inputs)
+    svar2_t = BENCH_SVAR2_THROUGHPUT(all_inputs)
     bcf_t = BENCH_BCF_THROUGHPUT(all_inputs)
     pgen_t = BENCH_PGEN_THROUGHPUT(all_inputs)
     presub_t = BENCH_PRESUBSET_BCF_THROUGHPUT(all_inputs)
 
     // Memory track (runs in parallel with throughput)
     svar_m = BENCH_SVAR_MEMORY(all_inputs)
+    svar2_m = BENCH_SVAR2_MEMORY(all_inputs)
     bcf_m = BENCH_BCF_MEMORY(all_inputs)
     pgen_m = BENCH_PGEN_MEMORY(all_inputs)
     presub_m = BENCH_PRESUBSET_BCF_MEMORY(all_inputs)
 
     throughput_grouped = svar_t
+        .mix(svar2_t)
         .mix(bcf_t)
         .mix(pgen_t)
         .mix(presub_t)
@@ -121,6 +134,7 @@ workflow {
         .groupBy()
 
     memory_grouped = svar_m
+        .mix(svar2_m)
         .mix(bcf_m)
         .mix(pgen_m)
         .mix(presub_m)
@@ -320,6 +334,37 @@ process BUILD_SVAR_FROM_PGEN {
     record(n: n, svar: file("N${n}.svar"))
 }
 
+process BUILD_SVAR2_FROM_PGEN {
+    queue 'carter-compute'
+    clusterOptions '--nodelist=carter-cn-04'
+    cpus 4
+    time 8.h
+    memory 128.GB
+
+    // SVAR2's batch-query API needs genoray>=3.4, which the shared `bench` env
+    // can't provide (genvarloader 0.24.x caps genoray <3) — see pixi.toml. Every
+    // SVAR2 process activates its own `svar2` pixi env instead of relying on the
+    // ambient PATH the other four methods share.
+    beforeScript '''
+    export PATH="/carter/users/dlaub/.pixi/bin:$PATH"
+    eval "$(pixi shell-hook -e svar2 --manifest-path /carter/users/dlaub/projects/gvl-paper/pixi.toml)"
+    '''
+
+    input:
+    n: Integer
+    pgen: Path
+    pvar: Path
+    psam: Path
+
+    script:
+    """
+    build_svar2_from_pgen.py ${pgen} N${n}.svar2 --threads ${task.cpus}
+    """
+
+    output:
+    record(n: n, svar2: file("N${n}.svar2"))
+}
+
 process GENERATE_PAIRS_N {
     queue 'carter-compute'
     cpus 2
@@ -327,7 +372,7 @@ process GENERATE_PAIRS_N {
     memory 16.GB
 
     input:
-    t: SubsetTriple
+    t: SubsetStores
     query_length: Integer
     n_replicates: Integer
     stream_batches: Integer
@@ -353,6 +398,7 @@ process GENERATE_PAIRS_N {
         n_samples: t.n,
         pairs: file("pairs_N${t.n}.parquet"),
         svar: t.svar,
+        svar2: t.svar2,
         bcf: t.bcf,
         bcf_csi: t.bcf_csi,
         pgen: t.pgen,
@@ -417,6 +463,74 @@ process BENCH_SVAR_MEMORY {
 
     output:
     record(method: "svar", csv: file("svar_q${p.query_length}_n${p.n_samples}_memory.csv"))
+}
+
+process BENCH_SVAR2_THROUGHPUT {
+    queue 'carter-compute'
+    clusterOptions '--nodelist=carter-cn-04'
+    cpus 8
+    time 1.d
+    memory 64.GB
+
+    // See BUILD_SVAR2_FROM_PGEN: SVAR2 needs genoray>=3.4, isolated from the
+    // shared `bench` env.
+    beforeScript '''
+    export PATH="/carter/users/dlaub/.pixi/bin:$PATH"
+    eval "$(pixi shell-hook -e svar2 --manifest-path /carter/users/dlaub/projects/gvl-paper/pixi.toml)"
+    '''
+
+    input:
+    p: SweepInput
+
+    script:
+    """
+    bench_svar2.py \\
+      ${p.pairs} \\
+      ${p.svar2} \\
+      svar2_q${p.query_length}_n${p.n_samples}_throughput.csv \\
+      --dataset ${params.dataset} \\
+      --mode throughput \\
+      --n-samples ${p.n_samples} \\
+      --min-seconds ${params.min_seconds} \\
+      --min-batches ${params.min_batches}
+    """
+
+    output:
+    record(method: "svar2", csv: file("svar2_q${p.query_length}_n${p.n_samples}_throughput.csv"))
+}
+
+process BENCH_SVAR2_MEMORY {
+    queue 'carter-compute'
+    clusterOptions '--nodelist=carter-cn-04'
+    cpus 8
+    time 1.d
+    memory 64.GB
+
+    // See BUILD_SVAR2_FROM_PGEN: SVAR2 needs genoray>=3.4, isolated from the
+    // shared `bench` env.
+    beforeScript '''
+    export PATH="/carter/users/dlaub/.pixi/bin:$PATH"
+    eval "$(pixi shell-hook -e svar2 --manifest-path /carter/users/dlaub/projects/gvl-paper/pixi.toml)"
+    '''
+
+    input:
+    p: SweepInput
+
+    script:
+    """
+    bench_svar2.py \\
+      ${p.pairs} \\
+      ${p.svar2} \\
+      svar2_q${p.query_length}_n${p.n_samples}_memory.csv \\
+      --dataset ${params.dataset} \\
+      --mode memory \\
+      --n-samples ${p.n_samples} \\
+      --min-seconds ${params.min_seconds} \\
+      --min-batches ${params.min_batches}
+    """
+
+    output:
+    record(method: "svar2", csv: file("svar2_q${p.query_length}_n${p.n_samples}_memory.csv"))
 }
 
 process BENCH_BCF_THROUGHPUT {
@@ -690,9 +804,10 @@ record MemoryPlots {
     n_pdf: Path
 }
 
-record SubsetTriple {
+record SubsetStores {
     n: Integer
     svar: Path
+    svar2: Path
     bcf: Path
     bcf_csi: Path
     pgen: Path
@@ -705,6 +820,7 @@ record SweepInput {
     n_samples: Integer
     pairs: Path
     svar: Path
+    svar2: Path
     bcf: Path
     bcf_csi: Path
     pgen: Path

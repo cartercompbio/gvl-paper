@@ -9,7 +9,7 @@ BIN="$ROOT/hap_track_throughput/bin_gvl027"
 OUT="$ROOT/results_gvl027"
 mkdir -p "$OUT"
 
-TCGA_FASTA=/cellar/users/dlaub/projects/tcga-atac/data/shared/GRCh38.d1.vd1.fa
+TCGA_FASTA=/carter/users/dlaub/projects/tcga-atac/data/shared/GRCh38.d1.vd1.fa
 KGP_FASTA=/carter/users/dlaub/data/1kGP/GRCh38_full_analysis_set_plus_decoy_hla.fa
 TCGA_DS_DIR="$ROOT/hap_track_throughput/data/datasets/tcga-atac"
 KGP_DS_DIR="$ROOT/hap_track_throughput/data/datasets_gvl027/1kgp"

@@ -25,10 +25,10 @@ class Dataset:
 class DatasetEnum(Enum):
     TCGA_ATAC = Dataset(
         fasta=Path(
-            "/cellar/users/dlaub/projects/tcga-atac/data/shared/GRCh38.d1.vd1.fa"
+            "/carter/users/dlaub/projects/tcga-atac/data/shared/GRCh38.d1.vd1.fa"
         ),
         variants=Path(
-            "/cellar/users/dlaub/projects/tcga-atac/data/shared/merged.norm.bcf"
+            "/carter/users/dlaub/projects/tcga-atac/data/shared/merged.norm.bcf"
         ),
         ds_dir=DS_DIR / "tcga-atac",
         bigwig_table=Path(
