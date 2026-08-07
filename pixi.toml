@@ -16,6 +16,13 @@ basenji2 = ["basenji2"]
 # (The old bench061 / genvarloader 0.6.1 env was removed 2026-06-23 along with its
 # results and 0.6.1-API scripts; recover from git history if a re-run is ever needed.)
 bench027 = ["bench027"]
+# genoray's SVAR2 batch-query API (SparseVar2._find_ranges/_gather_ranges, M6b)
+# needs genoray>=3.4, but genvarloader 0.24.x (pinned in `bench` above) caps
+# genoray <3 via its own requires_dist. Rather than bump genvarloader across
+# that major boundary for the whole `bench` env — and risk the version
+# sensitivity documented below for gpu_utilization/ and hap_track_throughput/
+# — the SVAR2 variant-throughput bench scripts get their own isolated env.
+svar2 = ["svar2"]
 
 [feature.bench.dependencies]
 python = "3.12.*"
@@ -63,6 +70,19 @@ cyclopts = ">=4.5.1, <5"
 polars = ">=1"
 psutil = "*"
 pytest = "*"
+
+[feature.svar2.dependencies]
+python = "3.12.*"
+
+[feature.svar2.pypi-dependencies]
+# SVAR2's private batch-query methods (_find_ranges/_gather_ranges) and
+# region_counts land in 3.4.0; no upper bound beyond <4 since nothing else
+# in this env pins genoray.
+genoray = ">=3.4.0,<4"
+numpy = "<2"
+polars = ">=1.37.1,<2"
+cyclopts = ">=4.5.1, <5"
+psutil = "*"
 
 [feature.basenji2.dependencies]
 python = "3.12.*"
