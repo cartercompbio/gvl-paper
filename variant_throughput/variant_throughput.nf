@@ -341,14 +341,8 @@ process BUILD_SVAR2_FROM_PGEN {
     time 8.h
     memory 128.GB
 
-    // SVAR2's batch-query API needs genoray>=3.4, which the shared `bench` env
-    // can't provide (genvarloader 0.24.x caps genoray <3) — see pixi.toml. Every
-    // SVAR2 process activates its own `svar2` pixi env instead of relying on the
-    // ambient PATH the other four methods share.
-    beforeScript '''
-    export PATH="/carter/users/dlaub/.pixi/bin:$PATH"
-    eval "$(pixi shell-hook -e svar2 --manifest-path /carter/users/dlaub/projects/gvl-paper/pixi.toml)"
-    '''
+    // beforeScript that activates the `svar2` pixi env lives in
+    // nextflow.config's `withName: 'BENCH_SVAR2_.*|BUILD_SVAR2_.*'` selector.
 
     input:
     n: Integer
@@ -472,12 +466,8 @@ process BENCH_SVAR2_THROUGHPUT {
     time 1.d
     memory 64.GB
 
-    // See BUILD_SVAR2_FROM_PGEN: SVAR2 needs genoray>=3.4, isolated from the
-    // shared `bench` env.
-    beforeScript '''
-    export PATH="/carter/users/dlaub/.pixi/bin:$PATH"
-    eval "$(pixi shell-hook -e svar2 --manifest-path /carter/users/dlaub/projects/gvl-paper/pixi.toml)"
-    '''
+    // beforeScript that activates the `svar2` pixi env lives in
+    // nextflow.config's `withName: 'BENCH_SVAR2_.*|BUILD_SVAR2_.*'` selector.
 
     input:
     p: SweepInput
@@ -506,12 +496,8 @@ process BENCH_SVAR2_MEMORY {
     time 1.d
     memory 64.GB
 
-    // See BUILD_SVAR2_FROM_PGEN: SVAR2 needs genoray>=3.4, isolated from the
-    // shared `bench` env.
-    beforeScript '''
-    export PATH="/carter/users/dlaub/.pixi/bin:$PATH"
-    eval "$(pixi shell-hook -e svar2 --manifest-path /carter/users/dlaub/projects/gvl-paper/pixi.toml)"
-    '''
+    // beforeScript that activates the `svar2` pixi env lives in
+    // nextflow.config's `withName: 'BENCH_SVAR2_.*|BUILD_SVAR2_.*'` selector.
 
     input:
     p: SweepInput

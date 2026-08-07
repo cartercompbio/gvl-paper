@@ -20,7 +20,7 @@
 #                    -resume reusing SVAR+write and --best_grid_dir.
 set -euo pipefail
 
-export PATH="/cellar/users/dlaub/.pixi/bin:$PATH"
+export PATH="/carter/users/dlaub/.pixi/bin:$PATH"
 ROOT=/carter/users/dlaub/projects/gvl-paper
 cd "$ROOT/hap_track_throughput"
 

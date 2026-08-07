@@ -13,7 +13,7 @@ from pytorch_lightning import Trainer
 from pytorch_lightning.loggers import WandbLogger
 from seqmodels import Module
 
-sys.path.insert(0, "/cellar/users/dlaub/projects/tcga-atac")
+sys.path.insert(0, "/carter/users/dlaub/projects/tcga-atac/src")
 from arch import BPNetHaps
 from dataloader import ATACDataModule
 from metrics import bpnetlite_loss, bpnetlite_metrics

@@ -8,7 +8,7 @@
 #SBATCH --time=0:25:00
 #SBATCH --output=/carter/users/dlaub/projects/gvl-paper/results_gvl027/_validate/validate_%j.log
 set -euo pipefail
-export PATH="/cellar/users/dlaub/.pixi/bin:$PATH"
+export PATH="/carter/users/dlaub/.pixi/bin:$PATH"
 cd /carter/users/dlaub/projects/gvl-paper/hap_track_throughput
 FASTA=/carter/users/dlaub/data/1kGP/GRCh38_full_analysis_set_plus_decoy_hla.fa
 pixi run -e bench027 python "$PWD/bin/benchmark_haps.py" \

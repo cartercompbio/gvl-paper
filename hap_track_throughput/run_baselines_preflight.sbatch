@@ -21,7 +21,7 @@
 #      a wall-time-per-cell figure to re-validate the 8h full-run budget now that
 #      FASTA reads are cold (slower than the cached dry-run).
 set -euo pipefail
-export PATH="/cellar/users/dlaub/.pixi/bin:$PATH"
+export PATH="/carter/users/dlaub/.pixi/bin:$PATH"
 ROOT=/carter/users/dlaub/projects/gvl-paper
 cd "$ROOT/hap_track_throughput"
 

@@ -17,7 +17,7 @@
 # Re-submitting resumes: built datasets and finished result CSVs are skipped.
 set -euo pipefail
 
-export PATH="/cellar/users/dlaub/.pixi/bin:$PATH"
+export PATH="/carter/users/dlaub/.pixi/bin:$PATH"
 # numba's thread-pool ceiling is fixed at import to the cpu count; pin it >= the
 # grid's max (64) so set_num_threads(64) is permitted.
 export NUMBA_NUM_THREADS=96

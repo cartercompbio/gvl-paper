@@ -17,7 +17,7 @@ basenji2 = ["basenji2"]
 # results and 0.6.1-API scripts; recover from git history if a re-run is ever needed.)
 bench027 = ["bench027"]
 # genoray's SVAR2 batch-query API (SparseVar2._find_ranges/_gather_ranges, M6b)
-# needs genoray>=3.4, but genvarloader 0.24.x (pinned in `bench` above) caps
+# needs genoray>=3.3.1, but genvarloader 0.24.x (pinned in `bench` above) caps
 # genoray <3 via its own requires_dist. Rather than bump genvarloader across
 # that major boundary for the whole `bench` env — and risk the version
 # sensitivity documented below for gpu_utilization/ and hap_track_throughput/
@@ -73,12 +73,25 @@ pytest = "*"
 
 [feature.svar2.dependencies]
 python = "3.12.*"
+# conftest.py's svar2_store fixture shells out to these directly; declare them
+# rather than relying on the user's global pixi (/carter/.../.pixi/bin).
+bcftools = ">=1.21"
+samtools = ">=1.21"
 
 [feature.svar2.pypi-dependencies]
 # SVAR2's private batch-query methods (_find_ranges/_gather_ranges) and
-# region_counts land in 3.4.0; no upper bound beyond <4 since nothing else
-# in this env pins genoray.
-genoray = ">=3.4.0,<4"
+# region_counts are present as of 3.3.1 (verified against that tag directly:
+# `_svar2_batch.py`/`_svar2_decode.py` already have them; genoray's 3.3.0
+# changelog is where the legacy SVAR1 writer got renamed to `write-svar1`,
+# which is the version this floor also has to clear -- see BUILD_SVAR_FROM_PGEN's
+# `genoray write` in variant_throughput.nf, unaffected because it runs in the
+# `bench` env, still pinned to 2.9.0). Floored at 3.3.1 rather than 3.4.0
+# because Task 5 writes the full-cohort 1kGP SVAR2 store with 3.3.1 while
+# BUILD_SVAR2_FROM_PGEN here writes the n-sweep subset stores against whatever
+# this floor resolves to -- flooring at 3.3.1 lets both land on the same
+# writer version instead of splitting one campaign across two. No upper bound
+# beyond <4 since nothing else in this env pins genoray.
+genoray = ">=3.3.1,<4"
 numpy = "<2"
 polars = ">=1.37.1,<2"
 cyclopts = ">=4.5.1, <5"

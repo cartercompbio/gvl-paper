@@ -450,7 +450,7 @@ def main(
 
 if __name__ == "__main__":
     ddir = Path("/carter/users/dlaub/data/1kGP")
-    res_dir = Path("/cellar/users/dlaub/projects/gvl-paper/results")
+    res_dir = Path("/carter/users/dlaub/projects/gvl-paper/results")
 
     main(
         svar=ddir / "1kGP.snp_indel.split_multiallelics.svar",

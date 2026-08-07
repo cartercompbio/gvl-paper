@@ -31,7 +31,7 @@
 # evicts each hap file's pages after every read, so every fetch is a cold storage read,
 # mirroring a real bcftools-consensus cohort where 2*n_samples FASTAs never fit in RAM.
 set -euo pipefail
-export PATH="/cellar/users/dlaub/.pixi/bin:$PATH"
+export PATH="/carter/users/dlaub/.pixi/bin:$PATH"
 ROOT=/carter/users/dlaub/projects/gvl-paper
 cd "$ROOT/hap_track_throughput"
 

@@ -28,7 +28,7 @@
 # POST-RUN CHECK: confirm the realized per-seqlen peak is NOT at batch==16384 (the cap
 # boundary). If it is, the peak may lie above the cap — raise --max-batch and re-run.
 set -euo pipefail
-export PATH="/cellar/users/dlaub/.pixi/bin:$PATH"
+export PATH="/carter/users/dlaub/.pixi/bin:$PATH"
 ROOT=/carter/users/dlaub/projects/gvl-paper
 cd "$ROOT/hap_track_throughput"
 
