@@ -23,11 +23,16 @@ np.random.seed(1234)
 
 # Paths
 fold = 0  # TODO: choose fold
-data_dir = Path("/cellar/shared/carterlab/data/ml4gland/tcga-atac/data")
+# The old /cellar/shared/carterlab/data/ml4gland/tcga-atac tree no longer exists;
+# these moved under the project checkout, and NOT by a plain prefix swap -- the
+# data landed in `data/shared/`, the models kept their `models/...` suffix.
+# Verified present: tcga-atac.gvl, GRCh38.d1.vd1.fa, splits/fold_0..4.json, and
+# the 241016/gvl/fold_0 output dir.
+data_dir = Path("/carter/users/dlaub/projects/tcga-atac/data/shared")
 gvl_path = data_dir / "tcga-atac.gvl"
 reference = data_dir / "GRCh38.d1.vd1.fa"
 fold_path = data_dir / "splits" / f"fold_{fold}.json"
-output_dir = f"/cellar/shared/carterlab/data/ml4gland/tcga-atac/models/variation_pilot/BPNet/HapsAndTracks/241016/gvl/fold_{fold}"
+output_dir = f"/carter/users/dlaub/projects/tcga-atac/models/variation_pilot/BPNet/HapsAndTracks/241016/gvl/fold_{fold}"
 os.makedirs(output_dir, mode=0o777, exist_ok=True)
 # os.chdir(output_dir)
 
