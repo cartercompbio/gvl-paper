@@ -79,19 +79,39 @@ bcftools = ">=1.21"
 samtools = ">=1.21"
 
 [feature.svar2.pypi-dependencies]
-# SVAR2's private batch-query methods (_find_ranges/_gather_ranges) and
-# region_counts are present as of 3.3.1 (verified against that tag directly:
-# `_svar2_batch.py`/`_svar2_decode.py` already have them; genoray's 3.3.0
-# changelog is where the legacy SVAR1 writer got renamed to `write-svar1`,
-# which is the version this floor also has to clear -- see BUILD_SVAR_FROM_PGEN's
-# `genoray write` in variant_throughput.nf, unaffected because it runs in the
-# `bench` env, still pinned to 2.9.0). Floored at 3.3.1 rather than 3.4.0
-# because Task 5 writes the full-cohort 1kGP SVAR2 store with 3.3.1 while
-# BUILD_SVAR2_FROM_PGEN here writes the n-sweep subset stores against whatever
-# this floor resolves to -- flooring at 3.3.1 lets both land on the same
-# writer version instead of splitting one campaign across two. No upper bound
-# beyond <4 since nothing else in this env pins genoray.
-genoray = ">=3.3.1,<4"
+# LOCAL BUILD, not a release. bench_svar2.py's timed read needs genoray's
+# read-bound flat gather (`SparseVar2._find_haps_ranges` /
+# `._gather_haps_readbound`), which existed in the Rust core as
+# `query::gather_haps_readbound` but had no PyO3 binding through 3.4.0. The
+# bindings were added on genoray branch `worktree-svar2-readbound-bindings`,
+# commit 361c426815a98da37f19e4ffc5e58e6ed8157798 (tag 3.4.0 plus one commit),
+# and built as the abi3 wheel below. Its version string is
+# `3.5.0.dev0+readbound` precisely so this artifact can never be mistaken for
+# released 3.4.0.
+#
+# Why the new binding and not the released API: `_gather_ranges`' RangesBundle
+# is inherently a region x sample RECTANGLE (gather.rs indexes its dense-carrier
+# check by sample SLOT), so covering the benchmark's arbitrary (region, sample)
+# pair set costs either the whole cross-product in one call or one call per
+# unique sample -- and every `gather_ranges` call rebuilds the contig-wide dense
+# union. Measured at query_length=2048: 341 per-sample calls cost 1287-1382 ms
+# vs 79-81 ms for one cross-product call that gathers 341x the requested cells.
+# Neither shape measures SVAR2's read cost.
+#
+# Consequence for reproduction: this path only resolves on the machine that
+# built the wheel. Rebuild with
+#   git -C <genoray> worktree add <dir> 361c426 && cd <dir> \
+#     && pixi run maturin build --release --features abi3 --out dist
+# then copy the wheel to the path below -- or repoint this at a released genoray
+# once the bindings land upstream (the floor then becomes >=3.5,<4).
+#
+# The SVAR2 WRITER version is a separate concern, unchanged by this: 361c426
+# branches from 3.4.0 and touches only read-path files, and FORMAT_VERSION is 1
+# at both 3.3.1 and 3.4.0, so the 3.3.1-written full-cohort 1kGP store (Task 5)
+# and the n-sweep subset stores BUILD_SVAR2_FROM_PGEN writes here stay mutually
+# readable. (The comment that used to sit here claimed the `>=3.3.1,<4` floor
+# made both land on 3.3.1; the committed lock resolved 3.4.0, so that was false.)
+genoray = { path = "/carter/users/dlaub/projects/genoray/wheelhouse/genoray-3.5.0.dev0+readbound-cp310-abi3-manylinux_2_28_x86_64.whl" }
 numpy = "<2"
 polars = ">=1.37.1,<2"
 cyclopts = ">=4.5.1, <5"

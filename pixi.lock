@@ -689,6 +689,7 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/linux-64/zstd-1.5.7-hb78ec9c_6.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/ca-certificates-2026.7.22-hbd8a1cb_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/tzdata-2026c-h151e31d_0.conda
+      - pypi: /carter/users/dlaub/projects/genoray/wheelhouse/genoray-3.5.0.dev0+readbound-cp310-abi3-manylinux_2_28_x86_64.whl
       - pypi: https://files.pythonhosted.org/packages/01/8e/1e35281b8ab6d5d72ebe9911edcdffa3f36b04ed9d51dec6dd140396e220/scipy-1.17.1-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl
       - pypi: https://files.pythonhosted.org/packages/01/c4/4fa4c8b3097a11f3c5f09a35b72ed6855fb1d332469504962ab7bafcc702/charset_normalizer-3.4.9-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl
       - pypi: https://files.pythonhosted.org/packages/0b/a7/71ac2cff56fec219ed242bb11b8efb69fcc4bec75db06fb7bfe35de520e6/certifi-2026.7.22-py3-none-any.whl
@@ -730,7 +731,6 @@ environments:
       - pypi: https://files.pythonhosted.org/packages/79/7b/2c79738432f5c924bef5071f933bcc9efd0473bac3b4aa584a6f7c1c8df8/mypy_extensions-1.1.0-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/7b/91/984aca2ec129e2757d1e4e3c81c3fcda9d0f85b74670a094cc443d9ee949/joblib-1.5.3-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/7d/68/d8d58938dfb1370b266a1a729e6d77a985be23689a0496498ee17b2cbf90/platformdirs-4.11.0-py3-none-any.whl
-      - pypi: https://files.pythonhosted.org/packages/7e/36/5097be182ab84db61dab91f9143c1097f2801e2c6997e52c1f4fe6cfa8b6/genoray-3.4.0-cp310-abi3-manylinux_2_28_x86_64.whl
       - pypi: https://files.pythonhosted.org/packages/7e/85/a5bfaebfd305ac18b57b0854d74e37e586809061a91fda62f0bd50c8518e/narwhals-2.24.0-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/7f/3e/5db95bcf282c52709639744ca2a8b149baccf648e39c8cc87553df9eae0c/urllib3-2.7.0-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/80/f2/72409351db66d0a317ec5087e076f31fb7b773a640db8a90ce6b5cac9edd/llvmlite-0.48.0-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.whl
@@ -2524,6 +2524,40 @@ packages:
   - pkg:pypi/widgetsnbextension?source=hash-mapping
   size: 889195
   timestamp: 1762040404362
+- pypi: /carter/users/dlaub/projects/genoray/wheelhouse/genoray-3.5.0.dev0+readbound-cp310-abi3-manylinux_2_28_x86_64.whl
+  name: genoray
+  version: 3.5.0.dev0+readbound
+  requires_dist:
+  - seqpro>=0.21.1,<0.23
+  - numpy>=1.26
+  - pandas>=2.2.3
+  - hirola>=0.3.0
+  - pgenlib>=0.91.0
+  - cyvcf2>=0.31.1
+  - pysam>=0.22
+  - polars>=1.37.1
+  - polars-bio>=0.20.1,<0.34
+  - pyranges>=0.1.3
+  - rich>=13
+  - typing-extensions>=4.14
+  - pyarrow>=21
+  - tqdm>=4.65
+  - phantom-types>=3
+  - more-itertools>=10
+  - loguru>=0.7.0
+  - attrs
+  - awkward
+  - numba
+  - cyclopts
+  - zstandard
+  - pydantic
+  - oxbow>=0.5.1,<0.6
+  - joblib>=1.4.2,<2
+  - joblib-progress>=1.0.6,<2
+  - filelock>3,<4
+  - scipy>=1.10
+  - pooch>=1.7
+  requires_python: '>=3.10,<3.15'
 - pypi: https://download-r2.pytorch.org/whl/cpu/torch-2.12.0%2Bcpu-cp312-cp312-manylinux_2_28_x86_64.whl
   name: torch
   version: 2.12.0+cpu
@@ -5441,41 +5475,6 @@ packages:
   - sphinx-gallery>=0.14.0 ; extra == 'doc'
   - pydoctor>=23.4.0 ; extra == 'doc'
   requires_python: '>=3.9'
-- pypi: https://files.pythonhosted.org/packages/7e/36/5097be182ab84db61dab91f9143c1097f2801e2c6997e52c1f4fe6cfa8b6/genoray-3.4.0-cp310-abi3-manylinux_2_28_x86_64.whl
-  name: genoray
-  version: 3.4.0
-  sha256: c93c0c8ecd198df87d7d0aa2fd42eb5254927f86376849a8c122b24fa0ce831a
-  requires_dist:
-  - seqpro>=0.21.1,<0.23
-  - numpy>=1.26
-  - pandas>=2.2.3
-  - hirola>=0.3.0
-  - pgenlib>=0.91.0
-  - cyvcf2>=0.31.1
-  - pysam>=0.22
-  - polars>=1.37.1
-  - polars-bio>=0.20.1,<0.34
-  - pyranges>=0.1.3
-  - rich>=13
-  - typing-extensions>=4.14
-  - pyarrow>=21
-  - tqdm>=4.65
-  - phantom-types>=3
-  - more-itertools>=10
-  - loguru>=0.7.0
-  - attrs
-  - awkward
-  - numba
-  - cyclopts
-  - zstandard
-  - pydantic
-  - oxbow>=0.5.1,<0.6
-  - joblib>=1.4.2,<2
-  - joblib-progress>=1.0.6,<2
-  - filelock>3,<4
-  - scipy>=1.10
-  - pooch>=1.7
-  requires_python: '>=3.10,<3.15'
 - pypi: https://files.pythonhosted.org/packages/7e/71/44ce230e1b7fadd372515a97e32a83011f906ddded8d03e3c6aafbdedbb7/rfc3987_syntax-1.1.0-py3-none-any.whl
   name: rfc3987-syntax
   version: 1.1.0

@@ -15,91 +15,61 @@ from _streaming import drive_loop, prime, run_stream
 Pair = tuple[tuple[str, int, int], str]
 
 
-def _narrow_bundle(
-    bundle: dict, samples_list: tuple[str, ...], sample_slot: dict[str, int]
-) -> list[dict]:
-    """Slice a full (R x S_unique x P) `_find_ranges` bundle down to one
-    narrowed bundle per unique sample, each containing only the region rows
-    that pair with it -- i.e. exactly the (region, sample) cells the pairs
-    name, not the whole cross-product.
+def _svar2_search(sv: SparseVar2, pairs: list[Pair]) -> list[tuple[str, dict]]:
+    """Setup phase: one interval search per contig, folded down to exactly the
+    pairs' (region, sample) cells.
 
-    This can't be a single narrowed bundle spanning multiple samples:
-    `gather_ranges` (src/query/gather.rs) ties its dense-carrier check to the
-    SAMPLE SLOT (`sample_cols[si]`), shared across every region row in the
-    bundle -- so one bundle can only span regions that all want the same
-    sample. Splitting by sample, not by region, is the only way to shrink
-    gather work to exactly the pair cells without re-running the search
-    (`_gather_ranges` does no `SearchTree` work either way, so this costs
-    only numpy indexing).
+    Structurally identical to `_svar_search` (SVAR v1): one cross-product
+    search call per contig over (this contig's regions) x (its unique
+    samples), then a per-pair diagonal extraction picking out the cells the
+    pairs actually name. Both steps run inside the timed setup, exactly as
+    SVAR v1's do.
 
-    Mirrors `_svar_search`'s per-pair diagonal extraction (SVAR v1), which
-    also runs inside the timed setup, not the timed gather -- so this is
-    called from `_svar2_search`, under `setup_ns`.
+    The fold is `HapRangesRect.select`, which produces genoray's FLAT
+    `HapRanges` contract: one row per pair, no sample axis. The alternative --
+    `_find_ranges`' `RangesBundle` -- cannot express that, since its
+    `sample_cols` axis makes it a region x sample rectangle; covering a pair
+    set with it costs either the whole cross-product in one gather or one
+    gather per unique sample, and every such gather rebuilds the contig-wide
+    dense union (`gather.rs::gather_ranges` -> `reader.dense_union()`).
     """
-    ploidy = int(bundle["ploidy"])
-    n_samples = int(bundle["n_samples"])
-    hpr = n_samples * ploidy  # haps per region in the FULL (unnarrowed) bundle
+    by_contig: dict[str, list[tuple[int, int, str]]] = defaultdict(list)
+    for (c, s, e), smp in pairs:
+        by_contig[c].append((s, e, smp))
 
-    rows_by_slot: dict[int, list[int]] = defaultdict(list)
-    for r, smp in enumerate(samples_list):
-        rows_by_slot[sample_slot[smp]].append(r)
-
-    out: list[dict] = []
-    for si, regions in rows_by_slot.items():
-        regions_arr = np.asarray(regions, dtype=np.int64)
-        vk_row_idx = (
-            regions_arr[:, None] * hpr + si * ploidy + np.arange(ploidy)[None, :]
-        ).reshape(-1)
-        out.append({
-            "region_starts": bundle["region_starts"][regions_arr],
-            "dense_range": bundle["dense_range"][regions_arr],
-            "dense_snp_range": bundle["dense_snp_range"][regions_arr],
-            "dense_indel_range": bundle["dense_indel_range"][regions_arr],
-            "sample_cols": bundle["sample_cols"][[si]],
-            "vk_snp_range": bundle["vk_snp_range"][vk_row_idx],
-            "vk_indel_range": bundle["vk_indel_range"][vk_row_idx],
-            "n_regions": len(regions),
-            "n_samples": 1,
-            "ploidy": ploidy,
-        })
-    return out
-
-
-def _svar2_search(sv: SparseVar2, pairs: list[Pair]) -> list[tuple[str, list[dict]]]:
-    """Setup phase: one cross-product interval search per contig (mirroring
-    `_svar_search`'s single `_find_starts_ends` call), narrowed down to
-    per-sample bundles covering exactly the pairs' (region, sample) cells
-    (mirroring `_svar_search`'s per-pair diagonal extraction). Both steps run
-    inside the timed setup, matching where SVAR v1 does its own extraction.
-    """
-    by_contig: dict[str, list[tuple[int, int, int, str]]] = defaultdict(list)
-    for i, ((c, s, e), smp) in enumerate(pairs):
-        by_contig[c].append((i, s, e, smp))
-
-    narrowed_by_contig: list[tuple[str, list[dict]]] = []
+    out: list[tuple[str, dict]] = []
     for contig, rows in by_contig.items():
-        _, starts_list, ends_list, samples_list = zip(*rows)
+        starts_list, ends_list, samples_list = zip(*rows)
         unique_samples = sorted(set(samples_list))
         sample_slot = {s: j for j, s in enumerate(unique_samples)}
 
-        bundle = sv._find_ranges(
+        rect = sv._find_haps_ranges(
             contig,
             np.asarray(starts_list, dtype=np.int64),
             np.asarray(ends_list, dtype=np.int64),
             samples=np.asarray(unique_samples),
         )
-        narrowed_by_contig.append(
-            (contig, _narrow_bundle(bundle, samples_list, sample_slot))
-        )
-    return narrowed_by_contig
+        # Region r of the rectangle IS pair r -- every pair contributed its own
+        # region row -- so the diagonal is (arange(n_pairs), that pair's slot).
+        out.append((
+            contig,
+            rect.select(
+                np.arange(len(rows)),
+                np.fromiter(
+                    (sample_slot[s] for s in samples_list),
+                    dtype=np.intp,
+                    count=len(rows),
+                ),
+            ),
+        ))
+    return out
 
 
-def _svar2_gather(sv: SparseVar2, narrowed_by_contig: list[tuple[str, list[dict]]]) -> None:
-    """Read phase: tree-free replay of exactly the narrowed (pair-cell)
-    bundles built during setup. The timed operation for throughput."""
-    for contig, narrowed in narrowed_by_contig:
-        for nb in narrowed:
-            sv._gather_ranges(contig, nb)
+def _svar2_gather(sv: SparseVar2, hap_ranges_by_contig: list[tuple[str, dict]]) -> None:
+    """Read phase: tree-free read-bound replay of exactly the pair cells, one
+    call per (batch, contig). The timed operation for throughput."""
+    for contig, hr in hap_ranges_by_contig:
+        sv._gather_haps_readbound(contig, hr)
 
 
 def _svar2_n_calls(sv: SparseVar2, pairs: list[Pair]) -> int:
@@ -153,17 +123,17 @@ def bench(
         if not batches:
             continue
 
-        # AOT interval search + bundle narrowing (cached ahead of training);
-        # timed once -> setup_ns. n_calls is intentionally NOT computed here
-        # -- see _svar2_n_calls.
+        # AOT interval search + per-pair diagonal fold (cached ahead of
+        # training); timed once -> setup_ns. n_calls is intentionally NOT
+        # computed here -- see _svar2_n_calls.
         t0 = perf_counter_ns()
-        bundles_per_batch = [_svar2_search(sv, pairs) for pairs in batches]
+        ranges_per_batch = [_svar2_search(sv, pairs) for pairs in batches]
         setup_ns = perf_counter_ns() - t0
 
         # Decode-free call count, computed OUTSIDE the timed setup region.
         payloads = [
-            (bundles, _svar2_n_calls(sv, pairs))
-            for bundles, pairs in zip(bundles_per_batch, batches)
+            (hap_ranges, _svar2_n_calls(sv, pairs))
+            for hap_ranges, pairs in zip(ranges_per_batch, batches)
         ]
         n_pairs = sum(len(pairs) for pairs in batches)
 
