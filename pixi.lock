@@ -689,7 +689,7 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/linux-64/zstd-1.5.7-hb78ec9c_6.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/ca-certificates-2026.7.22-hbd8a1cb_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/tzdata-2026c-h151e31d_0.conda
-      - pypi: /carter/users/dlaub/projects/genoray/wheelhouse/genoray-3.5.0.dev0+readbound-cp310-abi3-manylinux_2_28_x86_64.whl
+      - pypi: /carter/users/dlaub/projects/genoray/wheelhouse/genoray-3.5.0.dev1+readbound-cp310-abi3-manylinux_2_28_x86_64.whl
       - pypi: https://files.pythonhosted.org/packages/01/8e/1e35281b8ab6d5d72ebe9911edcdffa3f36b04ed9d51dec6dd140396e220/scipy-1.17.1-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl
       - pypi: https://files.pythonhosted.org/packages/01/c4/4fa4c8b3097a11f3c5f09a35b72ed6855fb1d332469504962ab7bafcc702/charset_normalizer-3.4.9-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl
       - pypi: https://files.pythonhosted.org/packages/0b/a7/71ac2cff56fec219ed242bb11b8efb69fcc4bec75db06fb7bfe35de520e6/certifi-2026.7.22-py3-none-any.whl
@@ -2524,9 +2524,9 @@ packages:
   - pkg:pypi/widgetsnbextension?source=hash-mapping
   size: 889195
   timestamp: 1762040404362
-- pypi: /carter/users/dlaub/projects/genoray/wheelhouse/genoray-3.5.0.dev0+readbound-cp310-abi3-manylinux_2_28_x86_64.whl
+- pypi: /carter/users/dlaub/projects/genoray/wheelhouse/genoray-3.5.0.dev1+readbound-cp310-abi3-manylinux_2_28_x86_64.whl
   name: genoray
-  version: 3.5.0.dev0+readbound
+  version: 3.5.0.dev1+readbound
   requires_dist:
   - seqpro>=0.21.1,<0.23
   - numpy>=1.26

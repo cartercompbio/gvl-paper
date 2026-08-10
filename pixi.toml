@@ -84,10 +84,11 @@ samtools = ">=1.21"
 # `._gather_haps_readbound`), which existed in the Rust core as
 # `query::gather_haps_readbound` but had no PyO3 binding through 3.4.0. The
 # bindings were added on genoray branch `worktree-svar2-readbound-bindings`,
-# commit 361c426815a98da37f19e4ffc5e58e6ed8157798 (tag 3.4.0 plus one commit),
+# commit 4fb2eb9e8a123089fe1c68e0e4ddc244dcc17873 (tag 3.4.0 plus two commits),
 # and built as the abi3 wheel below. Its version string is
-# `3.5.0.dev0+readbound` precisely so this artifact can never be mistaken for
-# released 3.4.0.
+# `3.5.0.dev1+readbound` precisely so this artifact can never be mistaken for
+# released 3.4.0 -- nor for the `dev0` wheel built at 361c426, which lacks the
+# opt-in LUT and is therefore a measurably different artifact.
 #
 # Why the new binding and not the released API: `_gather_ranges`' RangesBundle
 # is inherently a region x sample RECTANGLE (gather.rs indexes its dense-carrier
@@ -100,18 +101,18 @@ samtools = ">=1.21"
 #
 # Consequence for reproduction: this path only resolves on the machine that
 # built the wheel. Rebuild with
-#   git -C <genoray> worktree add <dir> 361c426 && cd <dir> \
+#   git -C <genoray> worktree add <dir> 4fb2eb9 && cd <dir> \
 #     && pixi run maturin build --release --features abi3 --out dist
 # then copy the wheel to the path below -- or repoint this at a released genoray
 # once the bindings land upstream (the floor then becomes >=3.5,<4).
 #
-# The SVAR2 WRITER version is a separate concern, unchanged by this: 361c426
+# The SVAR2 WRITER version is a separate concern, unchanged by this: 4fb2eb9
 # branches from 3.4.0 and touches only read-path files, and FORMAT_VERSION is 1
 # at both 3.3.1 and 3.4.0, so the 3.3.1-written full-cohort 1kGP store (Task 5)
 # and the n-sweep subset stores BUILD_SVAR2_FROM_PGEN writes here stay mutually
 # readable. (The comment that used to sit here claimed the `>=3.3.1,<4` floor
 # made both land on 3.3.1; the committed lock resolved 3.4.0, so that was false.)
-genoray = { path = "/carter/users/dlaub/projects/genoray/wheelhouse/genoray-3.5.0.dev0+readbound-cp310-abi3-manylinux_2_28_x86_64.whl" }
+genoray = { path = "/carter/users/dlaub/projects/genoray/wheelhouse/genoray-3.5.0.dev1+readbound-cp310-abi3-manylinux_2_28_x86_64.whl" }
 numpy = "<2"
 polars = ">=1.37.1,<2"
 cyclopts = ">=4.5.1, <5"
