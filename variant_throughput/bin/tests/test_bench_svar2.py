@@ -140,24 +140,71 @@ def test_split_matches_fused_read(svar2_store, contig, starts, ends, subset):
             )
 
 
-def test_svar2_n_calls_indexes_by_sample_not_full_cohort(svar2_store, contig):
-    """`_svar2_n_calls` must index region_counts's full-cohort sample axis down
-    to the named sample, not sum the whole cohort.
+def _region_counts_oracle(sv, pairs) -> int:
+    """The `region_counts` formulation of n_calls, kept as a TEST ORACLE only.
+
+    It counts over the store's FULL cohort on the sample axis and is then
+    indexed down to the named cells. Correct, but O(cohort) per region -- 425 s
+    for one 1kGP contig at query_length=2048 -- so `_svar2_n_calls` derives the
+    same number from the read-bound gather instead. This is what pins the two
+    together.
+    """
+    by_contig = {}
+    for (c, s, e), smp in pairs:
+        by_contig.setdefault(c, []).append((s, e, smp))
+    sample_idx = {s: j for j, s in enumerate(sv.available_samples)}
+    total = 0
+    for contig, rows in by_contig.items():
+        starts, ends, names = zip(*rows)
+        counts = sv.region_counts(contig, list(zip(starts, ends)))
+        for r, smp in enumerate(names):
+            total += int(counts[r, sample_idx[smp], :].sum())
+    return total
+
+
+def test_svar2_n_calls_counts_only_the_named_cells(svar2_store, contig):
+    """`_svar2_n_calls` must count the pairs' own `(region, sample)` cells, not
+    the whole cohort -- it is the denominator of every throughput number.
 
     Region [0, 5) covers only the pos-3 SNP (0-based pos 2, see conftest's
-    _SVAR2_VCF): S0 is het (1 carrier hap), S1 is hom-ref (0 carrier haps) --
-    verified directly against `sv.region_counts` in review. A batch naming
-    the zero-carrier sample must report 0, not the nonzero full-cohort total.
+    _SVAR2_VCF): S0 is het (1 carrier hap), S1 is hom-ref (0 carrier haps). A
+    batch naming only the zero-carrier sample must report 0, not the nonzero
+    full-cohort total.
     """
     sv = SparseVar2(str(svar2_store))
     zero_carrier = [((contig, 0, 5), "S1")]
-    assert _svar2_n_calls(sv, zero_carrier) == 0
+    assert _svar2_n_calls(sv, _svar2_search(sv, zero_carrier)) == 0
 
     one_carrier = [((contig, 0, 5), "S0")]
-    assert _svar2_n_calls(sv, one_carrier) == 1
+    assert _svar2_n_calls(sv, _svar2_search(sv, one_carrier)) == 1
 
     both = one_carrier + zero_carrier
-    assert _svar2_n_calls(sv, both) == 1
+    assert _svar2_n_calls(sv, _svar2_search(sv, both)) == 1
+
+
+@pytest.mark.parametrize(
+    "pairs_of",
+    [
+        lambda c: [((c, 0, 40), "S0")],
+        lambda c: [((c, 0, 40), "S0"), ((c, 0, 40), "S1")],
+        lambda c: [((c, 5, 20), "S1"), ((c, 0, 15), "S0"), ((c, 10, 40), "S1")],
+    ],
+    ids=["one_pair", "both_samples", "overlapping_regions"],
+)
+def test_svar2_n_calls_matches_region_counts_oracle(svar2_store, contig, pairs_of):
+    """The gather-derived count must equal the `region_counts` formulation.
+
+    `_svar2_n_calls` counts what the read-bound gather emits (var_key records +
+    set dense presence bits) rather than calling `region_counts`, purely for
+    speed. If the two ever diverge -- e.g. a dense presence bit counted in the
+    padding of the last byte, or a channel forgotten -- every SVAR2 throughput
+    number is silently rescaled, so they are pinned together here.
+    """
+    sv = SparseVar2(str(svar2_store))
+    pairs = pairs_of(contig)
+    got = _svar2_n_calls(sv, _svar2_search(sv, pairs))
+    assert got == _region_counts_oracle(sv, pairs)
+    assert got > 0, "fixture must exercise a nonzero count"
 
 
 def test_gather_covers_only_pair_cells_not_full_cross_product(svar2_store, contig):
@@ -193,7 +240,7 @@ def test_gather_covers_only_pair_cells_not_full_cross_product(svar2_store, conti
             split["ploidy"]
         )
 
-    n_calls = _svar2_n_calls(sv, pairs)
+    n_calls = _svar2_n_calls(sv, hap_ranges_by_contig)
     assert n_calls == 2, "fixture assumption: each named cell carries exactly 1 hap"
     assert gathered_cells == len(pairs)
     assert gathered_cells == n_calls

@@ -72,29 +72,34 @@ def _svar2_gather(sv: SparseVar2, hap_ranges_by_contig: list[tuple[str, dict]]) 
         sv._gather_haps_readbound(contig, hr)
 
 
-def _svar2_n_calls(sv: SparseVar2, pairs: list[Pair]) -> int:
-    """Decode-free call count for one batch, computed OUTSIDE the timed setup.
+def _svar2_n_calls(sv: SparseVar2, hap_ranges_by_contig: list[tuple[str, dict]]) -> int:
+    """Variant-record count for one batch, computed OUTSIDE the timed regions.
 
-    `region_counts` returns per-`(region, sample, ploid)` counts over the
-    store's FULL cohort on the sample axis, not the selected subset -- so we
-    must index out the `(region, sample)` cells this batch's pairs actually
-    name before summing. Naively summing the whole array would inflate
-    n_calls by the cohort size.
+    One extra (untimed) read-bound gather per contig, counting exactly what it
+    emits for the pairs' cells: the var_key records plus the set dense presence
+    bits. This is the SVAR2 analog of `_svar_search`'s
+    `(flat_ends - flat_starts).sum()` -- the number of variant records the
+    timed read copies -- and is the denominator every throughput number is
+    divided by, so it must count the SAME cells the gather covers. Deriving it
+    from the gather makes that identity structural rather than asserted.
+
+    The obvious alternative, `sv.region_counts`, counts over the store's FULL
+    cohort on the sample axis and is then indexed down to the named cells. It
+    agrees exactly (guarded in test_bench_svar2.py) but is unusable at campaign
+    scale: measured on 1kGP (3202 samples) at query_length=2048, one contig's
+    688 regions cost 425 s, against 3.2 ms for the gather below -- and the
+    q=2048 arm alone has 8192 regions per batch across 64 batches per
+    replicate.
     """
-    by_contig: dict[str, list[tuple[int, int, str]]] = defaultdict(list)
-    for (c, s, e), smp in pairs:
-        by_contig[c].append((s, e, smp))
-
-    sample_idx = {s: j for j, s in enumerate(sv.available_samples)}
-
     total = 0
-    for contig, rows in by_contig.items():
-        starts_list, ends_list, samples_list = zip(*rows)
-        # shape (R, S_full, P) -- S_full is the store's full cohort, not the
-        # pair list's selected subset.
-        counts = sv.region_counts(contig, list(zip(starts_list, ends_list)))
-        for r, smp in enumerate(samples_list):
-            total += int(counts[r, sample_idx[smp], :].sum())
+    for contig, hr in hap_ranges_by_contig:
+        d = sv._gather_haps_readbound(contig, hr)
+        total += len(np.asarray(d["vk_pos"]))
+        for cls in ("snp", "indel"):
+            n_bits = int(np.asarray(d[f"dense_{cls}_present_off"])[-1])
+            if n_bits:
+                bits = np.asarray(d[f"dense_{cls}_present"], np.uint8)
+                total += int(np.unpackbits(bits, bitorder="little")[:n_bits].sum())
     return total
 
 
@@ -130,10 +135,10 @@ def bench(
         ranges_per_batch = [_svar2_search(sv, pairs) for pairs in batches]
         setup_ns = perf_counter_ns() - t0
 
-        # Decode-free call count, computed OUTSIDE the timed setup region.
+        # Variant-record count, computed OUTSIDE the timed setup region.
         payloads = [
-            (hap_ranges, _svar2_n_calls(sv, pairs))
-            for hap_ranges, pairs in zip(ranges_per_batch, batches)
+            (hap_ranges, _svar2_n_calls(sv, hap_ranges))
+            for hap_ranges in ranges_per_batch
         ]
         n_pairs = sum(len(pairs) for pairs in batches)
 
