@@ -188,6 +188,16 @@ output {
 
 process COUNT_FULL_SAMPLES {
     queue 'carter-compute'
+    // Every task in the DAG must land on carter-cn-04: the campaign's Nextflow
+    // work directory lives on /local/$USER (node-local scratch, not NFS -- the
+    // heavy BENCH_PGEN_*/BUILD_*_FROM_PGEN processes already independently
+    // rebuild a large PGEN random-access index per task, so keeping that I/O
+    // off NFS matters). A task landing on any other node in the
+    // `carter-compute` partition would stage into a work dir that doesn't
+    // exist there and fail outright. This process previously had no pin
+    // because it isn't a timed measurement -- but it still needs the pin for
+    // this structural reason, not a measurement-purity one.
+    clusterOptions '--nodelist=carter-cn-04'
     cpus 1
     time 30.min
     memory 32.GB
@@ -206,6 +216,10 @@ process COUNT_FULL_SAMPLES {
 
 process GENERATE_PAIRS {
     queue 'carter-compute'
+    // See COUNT_FULL_SAMPLES: pinned so this task's work dir (on
+    // /local/$USER, node-local to carter-cn-04) actually exists on whichever
+    // node Slurm schedules it to.
+    clusterOptions '--nodelist=carter-cn-04'
     cpus 2
     time 2.h
     memory 16.GB
@@ -241,6 +255,8 @@ process GENERATE_PAIRS {
 
 process MAKE_SAMPLE_LIST {
     queue 'carter-compute'
+    // See COUNT_FULL_SAMPLES.
+    clusterOptions '--nodelist=carter-cn-04'
     cpus 1
     time 30.min
     memory 32.GB
@@ -261,6 +277,8 @@ process MAKE_SAMPLE_LIST {
 
 process SUBSET_BCF {
     queue 'carter-compute'
+    // See COUNT_FULL_SAMPLES.
+    clusterOptions '--nodelist=carter-cn-04'
     cpus 4
     time 4.h
     memory 16.GB
@@ -281,6 +299,8 @@ process SUBSET_BCF {
 
 process SUBSET_PGEN {
     queue 'carter-compute'
+    // See COUNT_FULL_SAMPLES.
+    clusterOptions '--nodelist=carter-cn-04'
     cpus 4
     time 4.h
     memory 16.GB
@@ -361,6 +381,8 @@ process BUILD_SVAR2_FROM_PGEN {
 
 process GENERATE_PAIRS_N {
     queue 'carter-compute'
+    // See COUNT_FULL_SAMPLES.
+    clusterOptions '--nodelist=carter-cn-04'
     cpus 2
     time 2.h
     memory 16.GB
