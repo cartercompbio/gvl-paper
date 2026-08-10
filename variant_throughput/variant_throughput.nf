@@ -32,6 +32,22 @@ workflow {
     pgen_stem = params.pgen.toString().replaceAll(/\.pgen$/, '')
     pvar_path = file("${pgen_stem}.pvar")
     psam_path = file("${pgen_stem}.psam")
+    // Pre-built genoray PGEN random-access index for the full cohort, already
+    // on disk (6.54GB, 2025-04-21) -- staged alongside pvar/psam/pgen for the
+    // full-cohort BENCH_PGEN_* processes below so genoray's _valid_index()
+    // finds it and loads it (~23s, verified directly against this exact file
+    // with genoray 2.9.0 -- the version bench_pgen.py actually imports)
+    // instead of rebuilding one from scratch (~28-29min measured in the
+    // smoke run, since Nextflow stages .pgen/.pvar/.psam as fresh per-task
+    // symlinks and this .gvi sidecar was never among them). Only wired into
+    // the two full-cohort BENCH_PGEN_* processes -- NOT into
+    // BUILD_SVAR_FROM_PGEN/BUILD_SVAR2_FROM_PGEN or the cohort-sweep's
+    // per-n subset pgens, which read a *different*, freshly-generated pgen
+    // file each run (via SUBSET_PGEN) that this index does not describe;
+    // staging it there would be a silent-corruption risk (genoray's
+    // _valid_index only checks existence + mtime ordering, not that the
+    // index actually matches the pvar's content).
+    pvar_gvi_path = file("${pvar_path}.gvi")
 
     lengths = channel.fromList(params.query_lengths)
     pairs_raw = GENERATE_PAIRS(
@@ -115,14 +131,14 @@ workflow {
     svar_t = BENCH_SVAR_THROUGHPUT(all_inputs)
     svar2_t = BENCH_SVAR2_THROUGHPUT(all_inputs)
     bcf_t = BENCH_BCF_THROUGHPUT(all_inputs)
-    pgen_t = BENCH_PGEN_THROUGHPUT(all_inputs)
+    pgen_t = BENCH_PGEN_THROUGHPUT(all_inputs, pvar_gvi_path)
     presub_t = BENCH_PRESUBSET_BCF_THROUGHPUT(all_inputs)
 
     // Memory track (runs in parallel with throughput)
     svar_m = BENCH_SVAR_MEMORY(all_inputs)
     svar2_m = BENCH_SVAR2_MEMORY(all_inputs)
     bcf_m = BENCH_BCF_MEMORY(all_inputs)
-    pgen_m = BENCH_PGEN_MEMORY(all_inputs)
+    pgen_m = BENCH_PGEN_MEMORY(all_inputs, pvar_gvi_path)
     presub_m = BENCH_PRESUBSET_BCF_MEMORY(all_inputs)
 
     throughput_grouped = svar_t
@@ -595,11 +611,27 @@ process BENCH_PGEN_THROUGHPUT {
     queue 'carter-compute'
     clusterOptions '--nodelist=carter-cn-04'
     cpus 8
-    time 1.d
+    // Was 1.d. query_length=2048 is single-pass over 65536 pairs/replicate
+    // x 5 replicates in production (verified against the pre-SVAR2
+    // committed svar_throughput.csv, which independently shows n_pairs=
+    // 65536 at query_length=2048). Measured PGEN per-pair cost in the smoke
+    // run: ~0.20-0.23s/pair -> ~19.1h for that read loop alone at
+    // query_length=2048, even with the index-rebuild tax removed (staging
+    // the existing .gvi below saves ~28-29min out of that, not the
+    // dominant term). 36h gives ~1.9x headroom over the ~19.1-19.6h
+    // estimate, comfortably under the partition's 14-day cap.
+    time 36.h
     memory 64.GB
 
     input:
     p: SweepInput
+    // Staged (basename-matched) alongside p.pgen/p.pvar/p.psam so genoray
+    // finds a valid index for the full-cohort case and skips rebuilding it.
+    // For cohort-sweep (subset-pgen) invocations this file's basename does
+    // NOT match that task's <subset>.pvar.gvi, so it is simply inert there
+    // -- genoray still rebuilds its own (small, ~15s) subset index exactly
+    // as before. See pvar_gvi_path's definition above for why this is safe.
+    gvi: Path
 
     script:
     """
@@ -625,6 +657,10 @@ process BENCH_PGEN_MEMORY {
 
     input:
     p: SweepInput
+    // See BENCH_PGEN_THROUGHPUT: staged so genoray finds the existing
+    // full-cohort index instead of rebuilding it; inert (harmless) for the
+    // cohort-sweep's subset-pgen invocations.
+    gvi: Path
 
     script:
     // q=2048 yields the largest batch (65536 pairs/rep). pgen reads run ~3/s, so
