@@ -33,20 +33,26 @@ workflow {
     pvar_path = file("${pgen_stem}.pvar")
     psam_path = file("${pgen_stem}.psam")
     // Pre-built genoray PGEN random-access index for the full cohort, already
-    // on disk (6.54GB, 2025-04-21) -- staged alongside pvar/psam/pgen for the
-    // full-cohort BENCH_PGEN_* processes below so genoray's _valid_index()
-    // finds it and loads it (~23s, verified directly against this exact file
-    // with genoray 2.9.0 -- the version bench_pgen.py actually imports)
-    // instead of rebuilding one from scratch (~28-29min measured in the
-    // smoke run, since Nextflow stages .pgen/.pvar/.psam as fresh per-task
-    // symlinks and this .gvi sidecar was never among them). Only wired into
-    // the two full-cohort BENCH_PGEN_* processes -- NOT into
-    // BUILD_SVAR_FROM_PGEN/BUILD_SVAR2_FROM_PGEN or the cohort-sweep's
-    // per-n subset pgens, which read a *different*, freshly-generated pgen
-    // file each run (via SUBSET_PGEN) that this index does not describe;
-    // staging it there would be a silent-corruption risk (genoray's
-    // _valid_index only checks existence + mtime ordering, not that the
-    // index actually matches the pvar's content).
+    // on disk (6.54GB, 2025-04-21) -- carried on every SweepInput's `gvi`
+    // field (see `pairs` below) so genoray's _valid_index() finds it and
+    // loads it (~23s, verified directly against this exact file with
+    // genoray 2.9.0 -- the version bench_pgen.py actually imports) instead
+    // of rebuilding one from scratch (~28-29min measured in the smoke run,
+    // since Nextflow stages .pgen/.pvar/.psam as fresh per-task symlinks and
+    // this .gvi sidecar was never among them).
+    //
+    // The cohort-sweep's per-n subset pgens (below) get their OWN `gvi`,
+    // built once by BUILD_SVAR_FROM_PGEN (which already constructs a PGEN
+    // reader as a side effect of `genoray write`) and threaded through
+    // SubsetStores/GENERATE_PAIRS_N -- NOT this full-cohort file, which
+    // would silently mismatch a subset's different variant set (genoray's
+    // _valid_index only checks existence + mtime ordering, not content).
+    // Before that dedup, BUILD_SVAR_FROM_PGEN, BENCH_PGEN_THROUGHPUT, and
+    // BENCH_PGEN_MEMORY each independently rebuilt their own copy of a
+    // subset's index (up to 20GB+ each even for the smallest n=32 subset,
+    // confirmed from the failed campaign's disk footprint) -- a second,
+    // independent driver of the ENOSPC failure alongside the uncompressed
+    // .pvar text SUBSET_PGEN used to emit (see SUBSET_PGEN below).
     pvar_gvi_path = file("${pvar_path}.gvi")
 
     lengths = channel.fromList(params.query_lengths)
@@ -70,6 +76,7 @@ workflow {
             pgen: params.pgen,
             pvar: pvar_path,
             psam: psam_path,
+            gvi: pvar_gvi_path,
         ) as SweepInput
     }
 
@@ -99,11 +106,15 @@ workflow {
     )
 
     subset_stores = svar_out
-        .map { r -> tuple(r.n, r.svar) }
+        // svar_out.gvi: BUILD_SVAR_FROM_PGEN's own genoray PGEN index for
+        // this n's subset pgen, built once and reused (see pvar_gvi_path
+        // above and BUILD_SVAR_FROM_PGEN's output below) instead of being
+        // independently rebuilt by every downstream consumer.
+        .map { r -> tuple(r.n, r.svar, r.gvi) }
         .join(svar2_out.map { r -> tuple(r.n, r.svar2) }, by: 0)
         .join(subset_bcf_out.map { r -> tuple(r.n, r.bcf, r.csi) }, by: 0)
         .join(subset_pgen_out.map { r -> tuple(r.n, r.pgen, r.pvar, r.psam) }, by: 0)
-        .map { n, svar, svar2, bcf, csi, pgen, pvar, psam ->
+        .map { n, svar, gvi, svar2, bcf, csi, pgen, pvar, psam ->
             record(
                 n: n,
                 svar: svar,
@@ -113,6 +124,7 @@ workflow {
                 pgen: pgen,
                 pvar: pvar,
                 psam: psam,
+                pvar_gvi: gvi,
             ) as SubsetStores
         }
 
@@ -131,14 +143,14 @@ workflow {
     svar_t = BENCH_SVAR_THROUGHPUT(all_inputs)
     svar2_t = BENCH_SVAR2_THROUGHPUT(all_inputs)
     bcf_t = BENCH_BCF_THROUGHPUT(all_inputs)
-    pgen_t = BENCH_PGEN_THROUGHPUT(all_inputs, pvar_gvi_path)
+    pgen_t = BENCH_PGEN_THROUGHPUT(all_inputs)
     presub_t = BENCH_PRESUBSET_BCF_THROUGHPUT(all_inputs)
 
     // Memory track (runs in parallel with throughput)
     svar_m = BENCH_SVAR_MEMORY(all_inputs)
     svar2_m = BENCH_SVAR2_MEMORY(all_inputs)
     bcf_m = BENCH_BCF_MEMORY(all_inputs)
-    pgen_m = BENCH_PGEN_MEMORY(all_inputs, pvar_gvi_path)
+    pgen_m = BENCH_PGEN_MEMORY(all_inputs)
     presub_m = BENCH_PRESUBSET_BCF_MEMORY(all_inputs)
 
     throughput_grouped = svar_t
@@ -333,17 +345,39 @@ process SUBSET_PGEN {
     stageAs pvar, 'in.pvar'
     stageAs psam, 'in.psam'
 
+    // `vzs` writes the .pvar as Zstd-compressed (.pvar.zst) instead of plain
+    // text -- ~31x smaller on this data (the source dir's own
+    // 1kGP.snp_indel.split_multiallelics.pvar.zst is 2.6GB against the
+    // 80.7GB plain .pvar). .pvar is per-VARIANT metadata, so it barely
+    // shrinks as samples drop -- this was THE dominant driver of the
+    // campaign's ENOSPC failure (N3202: 76GB .pvar; N1000: 62GB; N316:
+    // 44GB, for local /local/$USER work-dir copies that used to coexist
+    // uncompressed). Proven timing-neutral by reading genoray's PGEN
+    // reader (_pgen.py): `.pvar`/`.pvar.zst` are referenced ONLY inside
+    // `_index_path()`/`_load_index()`/`_write_index()`/`_scan_pvar()` --
+    // i.e. only at index-*build* time (once per subset, off any timed
+    // benchmark path) or as a same-cost `Path.exists()` check. Every read
+    // method (`read()`, `read_ranges()`, `_read_genos()`, etc.) operates
+    // exclusively on `self._index` (loaded once into memory from the
+    // cached `.gvi`) and the `.pgen` binary via pgenlib -- the `.pvar`/
+    // `.pvar.zst` text is never touched again. genoray already supports
+    // `.pvar.zst` as a first-class fallback (`_index_path`'s explicit
+    // `.pvar` -> `.pvar.zst` check; `_scan_pvar` opens `.zst` via
+    // `ZstdFile`), so no downstream code needs to change -- SparseVar2's
+    // own `_find_pvar` has the identical fallback, and `genoray write`'s
+    // `PGEN(...)` construction (BUILD_SVAR_FROM_PGEN, below) uses the same
+    // `_index_path()`.
     script:
     """
     awk 'BEGIN{OFS="\\t"} {print "0", \$1}' ${samples} > keep.tsv
-    plink2 --pfile in --keep keep.tsv --mac 1 --nonfounders --make-pgen --threads ${task.cpus} --out N${n}
+    plink2 --pfile in --keep keep.tsv --mac 1 --nonfounders --make-pgen vzs --threads ${task.cpus} --out N${n}
     """
 
     output:
     record(
         n: n,
         pgen: file("N${n}.pgen"),
-        pvar: file("N${n}.pvar"),
+        pvar: file("N${n}.pvar.zst"),
         psam: file("N${n}.psam"),
     )
 }
@@ -361,13 +395,33 @@ process BUILD_SVAR_FROM_PGEN {
     pvar: Path
     psam: Path
 
+    // `genoray write` constructs a `PGEN(pgen)` reader internally (same
+    // class/index cache as bench_pgen.py and the CLI's `write` command,
+    // confirmed by reading genoray/_cli/__main__.py), which unconditionally
+    // builds a `.gvi` index as a side effect if a valid one doesn't already
+    // exist next to `pvar` -- there never is one here, since `pvar` is a
+    // freshly-generated subset every run. Declaring that `.gvi` as a named
+    // output (instead of leaving it an untracked side effect) lets
+    // downstream consumers of this n's subset (BENCH_PGEN_THROUGHPUT/
+    // BENCH_PGEN_MEMORY, via SubsetStores.pvar_gvi / SweepInput.gvi) reuse
+    // it instead of each independently rebuilding their own copy -- before
+    // this, 3 tasks per cohort-sweep n-value each built their own copy of
+    // an index that was 20GB+ even for the smallest n=32 subset (measured
+    // from the failed campaign's disk footprint), a second, independent
+    // driver of the ENOSPC failure alongside SUBSET_PGEN's .pvar text.
+    // `.pvar.zst.gvi`, not `.pvar.gvi`: genoray's index path is derived
+    // from whichever of `.pvar`/`.pvar.zst` it actually finds next to
+    // `pgen` (see SUBSET_PGEN above, which now only ever produces
+    // `.pvar.zst`), and it appends `.gvi` to that file's own suffix --
+    // verified directly: `Path("N10.pvar.zst").with_suffix(".zst.gvi")` ==
+    // `Path("N10.pvar.zst.gvi")`.
     script:
     """
     genoray write ${pgen} N${n}.svar --threads ${task.cpus}
     """
 
     output:
-    record(n: n, svar: file("N${n}.svar"))
+    record(n: n, svar: file("N${n}.svar"), gvi: file("N${n}.pvar.zst.gvi"))
 }
 
 process BUILD_SVAR2_FROM_PGEN {
@@ -436,6 +490,7 @@ process GENERATE_PAIRS_N {
         pgen: t.pgen,
         pvar: t.pvar,
         psam: t.psam,
+        gvi: t.pvar_gvi,
     )
 }
 
@@ -624,14 +679,12 @@ process BENCH_PGEN_THROUGHPUT {
     memory 64.GB
 
     input:
+    // p.gvi is staged (basename-matched) alongside p.pgen/p.pvar/p.psam so
+    // genoray finds a valid index instead of rebuilding one: the full
+    // cohort's pre-built index for primary-sweep records, or that n's
+    // once-built subset index (from BUILD_SVAR_FROM_PGEN) for cohort-sweep
+    // records. See pvar_gvi_path's definition above.
     p: SweepInput
-    // Staged (basename-matched) alongside p.pgen/p.pvar/p.psam so genoray
-    // finds a valid index for the full-cohort case and skips rebuilding it.
-    // For cohort-sweep (subset-pgen) invocations this file's basename does
-    // NOT match that task's <subset>.pvar.gvi, so it is simply inert there
-    // -- genoray still rebuilds its own (small, ~15s) subset index exactly
-    // as before. See pvar_gvi_path's definition above for why this is safe.
-    gvi: Path
 
     script:
     """
@@ -656,11 +709,9 @@ process BENCH_PGEN_MEMORY {
     memory 64.GB
 
     input:
+    // See BENCH_PGEN_THROUGHPUT: p.gvi is staged so genoray finds an
+    // already-built index instead of rebuilding one.
     p: SweepInput
-    // See BENCH_PGEN_THROUGHPUT: staged so genoray finds the existing
-    // full-cohort index instead of rebuilding it; inert (harmless) for the
-    // cohort-sweep's subset-pgen invocations.
-    gvi: Path
 
     script:
     // q=2048 yields the largest batch (65536 pairs/rep). pgen reads run ~3/s, so
@@ -857,6 +908,10 @@ record SubsetStores {
     pgen: Path
     pvar: Path
     psam: Path
+    // This n's genoray PGEN index, built once by BUILD_SVAR_FROM_PGEN and
+    // reused by BENCH_PGEN_THROUGHPUT/BENCH_PGEN_MEMORY via SweepInput.gvi
+    // -- see pvar_gvi_path's definition in the workflow block.
+    pvar_gvi: Path
 }
 
 record SweepInput {
@@ -870,6 +925,12 @@ record SweepInput {
     pgen: Path
     pvar: Path
     psam: Path
+    // Genoray PGEN index for `pgen`/`pvar`: the full cohort's pre-built one
+    // for primary-sweep records, or that n's once-built subset one for
+    // cohort-sweep records. Staged into BENCH_PGEN_THROUGHPUT/
+    // BENCH_PGEN_MEMORY alongside pgen/pvar/psam so genoray finds it valid
+    // instead of rebuilding it.
+    gvi: Path
 }
 
 record MethodResult {
