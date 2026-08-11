@@ -367,10 +367,47 @@ process SUBSET_PGEN {
     // own `_find_pvar` has the identical fallback, and `genoray write`'s
     // `PGEN(...)` construction (BUILD_SVAR_FROM_PGEN, below) uses the same
     // `_index_path()`.
+    //
+    // `pvar-cols=maybecm` (a --make-pgen MODIFIER, not a standalone flag --
+    // `--pvar-cols=` alone is rejected as an unrecognized flag) drops the
+    // optional xheader/QUAL/FILTER/INFO column sets, leaving the five
+    // mandatory .pvar columns #CHROM/POS/ID/REF/ALT. CM is all-zero on this
+    // data, so `maybecm` emits no CM column either. `vzs` alone was NOT
+    // enough and this is why: the source .pvar's INFO column is a ~1kB
+    // per-variant allele-frequency block (AC/AF/AN across five
+    // superpopulations x rel/unrel), which is essentially the whole 80.7GB.
+    // plink2 copies INFO through verbatim -- and its AC/AF are the ORIGINAL
+    // full-cohort values, never recomputed for the subset, so they are stale
+    // as well as unused. Worse, genoray's `_write_index` persists EVERY
+    // column present in the .pvar into the Arrow-IPC `.gvi`, so compressing
+    // the .pvar to 4.6GB still produced a ~66GB `N1000.pvar.zst.gvi`
+    // (sink_ipc's per-row zstd recovers far less on INFO than plink2's
+    // whole-stream zstd) -- and BUILD_SVAR_FROM_PGEN's `.svar/index.arrow`
+    // is a second, byte-identical copy of that same index, so every cohort
+    // point paid for the INFO index TWICE. That is what ENOSPC'd the
+    // campaign twice.
+    //
+    // MEASURED equivalence on a 200-sample chr22 subset (DEF = current
+    // flags, MIN = with `pvar-cols=maybecm`):
+    //   .pgen bitwise identical; .psam identical; 270,568 variants both;
+    //   CHROM/POS/ID/REF/ALT md5 identical; genoray's loaded index columns
+    //   and their CHROM/POS/REF/ILEN values all equal (INFO never survives
+    //   `_load_index`, which projects to
+    //   ['index','CHROM','POS','REF','ALT','ILEN']).
+    //   .pvar.zst 38.7MB -> 2.2MB (17.5x); `.gvi` 339MB -> 23.9MB (14.2x).
+    //   SVAR2 store: all 17 files byte-identical.
+    //   SVAR v1 read: genotype md5 identical, 85.14 -> 85.23 M calls/s
+    //   (0.1%, noise), resident index 10,052,212 -> 10,052,218 bytes.
+    //   Only `setup_ns` changes (123.8ms -> 24.8ms, a smaller index.arrow to
+    //   load); it is recorded as its own column and is not the timed read.
+    // ILEN is safe because this dataset has ZERO symbolic ALT alleles, so
+    // `_load_index`'s INFO-present branch (regex SVLEN/END/IMPRECISE ->
+    // `_symbolic_ilen()`) and its INFO-absent branch agree on every row --
+    // verified by comparing ILEN values directly, not just hashes.
     script:
     """
     awk 'BEGIN{OFS="\\t"} {print "0", \$1}' ${samples} > keep.tsv
-    plink2 --pfile in --keep keep.tsv --mac 1 --nonfounders --make-pgen vzs --threads ${task.cpus} --out N${n}
+    plink2 --pfile in --keep keep.tsv --mac 1 --nonfounders --make-pgen vzs pvar-cols=maybecm --threads ${task.cpus} --out N${n}
     """
 
     output:
